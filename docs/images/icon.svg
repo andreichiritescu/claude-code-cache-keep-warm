@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">Cache Keep-Warm icon: a green circle three-quarters full</title>
+  <rect width="512" height="512" rx="112" fill="#1c1c1c"/>
+  <g transform="translate(256 256)">
+    <circle r="150" fill="none" stroke="#3fb950" stroke-width="22"/>
+    <path d="M0 0 L0 -118 A118 118 0 1 1 -118 0 Z" fill="#3fb950"/>
+  </g>
+</svg>
