@@ -56,7 +56,7 @@ Copy this into any Claude Code session:
 
 ```text
 Install the Cache Keep-Warm mod from https://github.com/andreichiritescu/claude-code-cache-keep-warm for me:
-1. Run: claude plugin marketplace add andreichiritescu/claude-code-cache-keep-warm
+1. Run: claude plugin marketplace add https://github.com/andreichiritescu/claude-code-cache-keep-warm.git
 2. Run: claude plugin install cache-keep-warm@cache-keep-warm
 3. If a step fails because my Claude Code is too old, tell me to update it (the mod needs Claude Code 2.1.287 or newer, or the desktop app with 2.1.286 or newer) and stop.
 4. When it is installed, tell me to run /reload-plugins so this session loads it, and that I can turn keep-warm on with the Keep warm button on the new line above the prompt, or with /keepwarm on.
@@ -67,17 +67,17 @@ Install the Cache Keep-Warm mod from https://github.com/andreichiritescu/claude-
 Type this at the Claude Code prompt (Claude Code 2.1.275 or newer):
 
 ```text
-/plugin install cache-keep-warm --marketplace andreichiritescu/claude-code-cache-keep-warm
+/plugin install cache-keep-warm --marketplace https://github.com/andreichiritescu/claude-code-cache-keep-warm.git
 ```
 
 ### Or in your terminal
 
 ```bash
-claude plugin marketplace add andreichiritescu/claude-code-cache-keep-warm
+claude plugin marketplace add https://github.com/andreichiritescu/claude-code-cache-keep-warm.git
 claude plugin install cache-keep-warm@cache-keep-warm
 ```
 
-Then start a new session, or run `/reload-plugins` in an open one. The line appears above the prompt, and the countdown starts with your first message.
+Then start a new session, or run `/reload-plugins` in an open one. The line appears above the prompt, and the countdown starts with your first message. If Claude Code says an option is not set yet, that is the **Mark the session title** setting: it is on by default.
 
 > **Needs** Claude Code 2.1.287 or newer in a terminal, or the Claude desktop app with Claude Code 2.1.286 or newer. Type `/status` to check your version.
 
