@@ -12,7 +12,7 @@ A small mod for [Claude Code](https://code.claude.com) that shows how long your 
 
 <br>
 
-<img src="docs/images/line.svg" alt="The Cache Keep-Warm line above the Claude Code prompt: a green circle, seven of ten green blocks, '40 min left (14:12) · next ping 14:07 · 773k cached' and a Stop button" width="100%">
+<img src="docs/images/screenshot.png" alt="Cache Keep-Warm in the Claude Code desktop app: a green countdown line above the prompt reading '57 min left (21:38) · next ping 21:33 · 1 ping ✓ · 460k cached', and the session list with a green dot in front of the sessions being kept warm" width="100%">
 
 </div>
 
