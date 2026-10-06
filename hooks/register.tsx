@@ -220,7 +220,7 @@ async function save($: EngineInterface) {
   const { value: keepWarm = false } = await $.state.get(KEEP_WARM)
   const { value: stopAt = 0 } = await $.state.get(STOP_AT)
   const { value: ttl = null } = await $.state.get(TTL)
-  const saved: KeepWarmSaved = { lastRequestAt, keepWarm, stopAt, ttl }
+  const saved: KeepWarmSaved = { lastRequestAt, keepWarm, stopAt, ttl, savedAt: await $.clock.now() }
   await $.store.set(live.storeKey, saved)
 }
 
@@ -403,12 +403,16 @@ export const register: Register = (on, options) => {
       await save($)
     }
 
-    // Forget sessions untouched for a week so the store stays small.
+    // Forget sessions untouched for a week so the store stays small. Aged by the last save: a
+    // session /compact or /clear just reset has no last request, yet is in use (counting from 0
+    // deleted its entry, keep-warm switch included). An old entry with no date at all is kept
+    // while its keep-warm is on.
     const t = await $.clock.now()
     for (const key of await $.store.keys()) {
       if (!key.startsWith(STORE_PREFIX) || key === live.storeKey) continue
       const old = (await $.store.get(key)) as KeepWarmSaved | undefined
-      if (!old || t - old.lastRequestAt > STORE_MAX_AGE_MS) await $.store.delete(key)
+      const at = old ? (old.savedAt ?? old.lastRequestAt) : 0
+      if (!old || (at > 0 ? t - at > STORE_MAX_AGE_MS : !old.keepWarm)) await $.store.delete(key)
     }
 
     await tick($)
@@ -433,14 +437,18 @@ export const register: Register = (on, options) => {
       await $.state.set(CONTEXT, 0)
       await $.state.set(PING_ERROR, '')
       await $.state.set(NOW, t)
-      await save($)
+      const { value: restored = false } = await $.state.get(RESTORED)
+      if (restored) await save($)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
       const lastAt = t - e.seconds_since_last_response * 1000 - RESUME_MARGIN_MS
       const { value: last = 0 } = await $.state.get(LAST)
       if (lastAt > last) await $.state.set(LAST, lastAt)
       if (e.context_tokens) await $.state.set(CONTEXT, e.context_tokens)
       await $.state.set(NOW, t)
-      await save($)
+      // At a relaunch this can run before session.start has restored the saved values: saving
+      // now would write the defaults (keep-warm off) over them. session.start saves after it.
+      const { value: restored = false } = await $.state.get(RESTORED)
+      if (restored) await save($)
     }
     return next(e)
   })
@@ -577,7 +585,7 @@ export const register: Register = (on, options) => {
 
     // The first part (time left) is drawn bold; the dot and the button already say whether
     // keep-warm is on, so the text no longer repeats it.
-    const main = last === 0 ? 'no request seen yet' : isWarm ? timeLeft(remaining) : `cold since ${clockTime(expiresAt)}`
+    const main = last === 0 ? 'nothing cached yet' : isWarm ? timeLeft(remaining) : `cold since ${clockTime(expiresAt)}`
     // "58 min left (14:12)": the clock time the cache expires, right after the time left.
     const expiresText = isWarm ? ` (${clockTime(expiresAt)})` : ''
     const parts: string[] = []

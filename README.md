@@ -102,6 +102,7 @@ Keep-warm is **off by default** and you switch it **per session**: only the sess
 | You see | It means |
 | --- | --- |
 | **◕** and **▰▰▰▰▰▰▰▱▱▱** | How much of the cache's life is left. **Green** while keep-warm is on, grey when it is off, and **○** once the cache has expired. |
+| **nothing cached yet** | A new conversation, or one you just cleared or compacted: nothing of it is cached until your next message, and the countdown starts with that. |
 | **40 min left (14:12)** | Time left, and the clock time the cache expires if nothing happens. |
 | **next ping 14:07** | When keep-warm will read the cache next. **(shows in chat)** means this ping is a short visible message, because the session hasn't answered since the app restarted. |
 | **3 pings ✓** | Pings so far, and whether the last one found the cache warm (✓) or cold (✗). |
