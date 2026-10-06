@@ -1,0 +1,3 @@
+# Typings Claude Code writes beside a mod it loads from a folder you own
+.claude-plugin/types/
+tsconfig.json

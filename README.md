@@ -1,0 +1,188 @@
+<div align="center">
+
+# Cache Keep-Warm
+
+**Stop paying to re-cache your whole Claude Code conversation after a break.**
+
+A small mod for [Claude Code](https://code.claude.com) that shows how long your session's prompt cache stays warm, and keeps it warm while you are away.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-d97757)](https://code.claude.com)
+![Works in](https://img.shields.io/badge/works%20in-desktop%20app%20%C2%B7%20terminal-555)
+
+<br>
+
+<img src="docs/images/line.svg" alt="The Cache Keep-Warm line above the Claude Code prompt: a green circle, seven of ten green blocks, '40 min left (14:12) · next ping 14:07 · 773k cached' and a Stop button" width="100%">
+
+</div>
+
+<br>
+
+## Why you would want it
+
+Claude Code keeps your conversation in a **prompt cache**, so every message only pays full price for what is new. But the cache expires when you stop typing for a while: **after one hour** on a Claude subscription, **after five minutes** on an API key.
+
+Come back after that, and your next message has to write the **whole conversation** into the cache again. For a long session that is the most expensive message of the day.
+
+Cache Keep-Warm fixes that:
+
+- ⏱️ **See it.** A line above the prompt counts down until the cache expires.
+- ♨️ **Keep it.** One click, and the cache stays warm while you are away: a tiny background read just before it would expire.
+- 🟢 **Know where.** In the desktop app, every session being kept warm gets a green dot in the session list.
+
+<div align="center">
+<img src="docs/images/sessions.svg" alt="The desktop app's session list, with a green dot in front of the two sessions that keep-warm is on in" width="420">
+</div>
+
+### What it saves
+
+Example: a long conversation of **500k tokens** on Claude Opus 5.5, at current API list prices.
+
+| | Cost |
+| --- | ---: |
+| Your next message after the cache expired (re-writes everything) | **≈ $4.00** |
+| One keep-warm ping (reads it from the cache) | ≈ $0.10 |
+| Keeping it warm through an 8-hour night (8 pings) | ≈ $0.80 |
+
+On a subscription you do not pay per token, but the same proportions apply to your usage limits.
+
+<br>
+
+## Install
+
+In your terminal:
+
+```bash
+claude plugin marketplace add andreichiritescu/claude-code-cache-keep-warm
+claude plugin install cache-keep-warm@cache-keep-warm
+```
+
+Then start a new session (or run `/reload-plugins` in an open one). The line appears above the prompt, and the countdown starts with your first message.
+
+> **Needs** Claude Code 2.1.287 or newer in a terminal, or the Claude desktop app with Claude Code 2.1.286 or newer. Type `/status` to check your version.
+
+<br>
+
+## Use it
+
+Click **Keep warm** on the line, or type a command:
+
+| Command | What it does |
+| --- | --- |
+| `/keepwarm on` | Keep this session warm |
+| `/keepwarm 3h` | Keep it warm for 3 hours |
+| `/keepwarm until 18:00` | Keep it warm until 18:00 |
+| `/keepwarm off` | Stop (or click **Stop**) |
+| `/keepwarm` | Show the state and the last pings |
+
+Keep-warm is **off by default** and you switch it **per session**: only the sessions you want are kept warm. It stops by itself after about 18 hours (20 pings in a row) unless you gave it a time, because past that point one re-write is cheaper than more pings.
+
+### Reading the line
+
+| You see | It means |
+| --- | --- |
+| **◕** and **▰▰▰▰▰▰▰▱▱▱** | How much of the cache's life is left. **Green** while keep-warm is on, grey when it is off, and **○** once the cache has expired. |
+| **40 min left (14:12)** | Time left, and the clock time the cache expires if nothing happens. |
+| **next ping 14:07** | When keep-warm will read the cache next. |
+| **3 pings ✓** | Pings so far, and whether the last one found the cache warm (✓) or cold (✗). |
+| **773k cached** | The size of your conversation, which is what your next message would re-write if the cache went cold. |
+
+<br>
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["You stop typing"] --> B{"55 minutes later:<br/>still away?"}
+    B -- yes --> C["Keep-warm reads the<br/>conversation from the cache"]
+    C --> D["The cache is good<br/>for another hour"]
+    D --> B
+    B -- "you are back" --> E["Your next message<br/>reads from the cache:<br/>cheap"]
+```
+
+- **It never wakes a cold cache.** The ping goes out 5 minutes before the cache would expire. If the cache has already expired, keep-warm waits for your next message instead of paying to rebuild it.
+- **Nothing is added to your conversation.** The ping sends your conversation once more, outside the chat, with a one-line question, and throws the answer away.
+- **It works while Claude is waiting for you**, for example on a question it asked you or a permission prompt.
+- **It is light.** The line itself never calls the model: one quick local check every 15 seconds, redrawn at most once a minute. The only thing that uses your plan or credits is the ping, about once every 55 minutes, in sessions where keep-warm is on.
+
+<details>
+<summary><b>How it knows how long your cache lasts</b></summary>
+
+<br>
+
+1. **Your settings**, if you set one: `promptCacheTtl`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `FORCE_PROMPT_CACHING_5M` or `ENABLE_PROMPT_CACHING_1H`.
+2. **Otherwise your plan.** A Claude subscription within its usage limits gets one hour. Once you are over the limit (paying with usage credits), or on an API key or a cloud provider, it is five minutes.
+3. **Then it checks what really happens.** Every request shows whether it read the conversation from the cache or had to re-write it. If the cache went cold sooner than expected, keep-warm pauses and tells you, and resumes once the cache is seen lasting again. So if Claude Code ever changes how long the cache lasts, the mod follows.
+
+Keep-warm only pings a cache that lasts **30 minutes or more**: on the five-minute cache, pinging every few minutes would cost more than it saves.
+
+</details>
+
+<details>
+<summary><b>Settings</b></summary>
+
+<br>
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Mark the session title | On | While keep-warm is on, put 🟢 in front of the session's title in the desktop app's session list |
+
+Change it in `/config`, or with `/plugin configure cache-keep-warm@cache-keep-warm`.
+
+In the desktop app, renaming a title **you typed yourself** asks for your approval each time; titles the app generated change without asking.
+
+</details>
+
+<details>
+<summary><b>Privacy and safety</b></summary>
+
+<br>
+
+A mod runs inside Claude Code with your permissions. This one:
+
+- makes **no network calls of its own**. The only thing it sends is the ping, through Claude Code, to Anthropic, with your own account.
+- reads your Claude Code settings and three environment variables (listed above) to learn how long your cache lasts.
+- stores, per session, only the time of the last request, whether keep-warm is on, and the stop time you gave it.
+- in the desktop app, reads and renames the current session's title (if that setting is on).
+
+To see everything it does before you install it, clone this repository and run:
+
+```bash
+claude plugin validate ./claude-code-cache-keep-warm
+```
+
+The `hooks:` and `calls:` lines list every event it handles and everything it asks Claude Code to do.
+
+</details>
+
+<details>
+<summary><b>Questions</b></summary>
+
+<br>
+
+**I use an API key. Does keep-warm work for me?**
+Your cache lasts five minutes by default, so keep-warm does not ping. If you take longer breaks, set `promptCacheTtl` to `"1h"` in your Claude Code settings: the cache then lasts an hour and keep-warm works. One-hour cache writes cost more than five-minute ones, so this pays off only if you do take breaks.
+
+**Will it ping forever if I forget it?**
+No. It stops by itself after 20 pings in a row (about 18 hours), or at the time you gave it with `/keepwarm 3h` or `/keepwarm until 18:00`.
+
+**Does it work in VS Code?**
+The keep-warm pings work there, but the line is only drawn in the terminal and in the desktop app's Code tab.
+
+**Where does the line not appear?**
+In VS Code's chat panel, in `claude -p` runs and in cloud sessions.
+
+**How do I remove it?**
+`claude plugin uninstall cache-keep-warm@cache-keep-warm`
+
+</details>
+
+<br>
+
+---
+
+<div align="center">
+
+[MIT License](LICENSE) · A community mod, not made by Anthropic · Issues and ideas welcome
+
+</div>

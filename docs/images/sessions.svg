@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="168" viewBox="0 0 420 168" role="img" aria-labelledby="t d">
+  <title id="t">Sessions kept warm in the desktop app</title>
+  <desc id="d">The desktop app's session list: two sessions have a green dot in front of their title because keep-warm is on in them.</desc>
+  <rect x="0.5" y="0.5" width="419" height="167" rx="12" fill="#1c1c1c" stroke="#2c2c2c"/>
+  <text x="20" y="30" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8a8a8a">my-project</text>
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e6e6e6">
+    <circle cx="26" cy="57" r="3.5" fill="none" stroke="#777" stroke-width="1.2"/>
+    <circle cx="50" cy="57" r="7" fill="#3fb950"/>
+    <text x="64" y="62">Refactor the billing module</text>
+    <circle cx="26" cy="89" r="3.5" fill="none" stroke="#777" stroke-width="1.2"/>
+    <text x="42" y="94">Fix the flaky login test</text>
+    <rect x="8" y="106" width="404" height="32" rx="8" fill="#2a2a2a"/>
+    <circle cx="26" cy="122" r="3.5" fill="none" stroke="#777" stroke-width="1.2"/>
+    <circle cx="50" cy="122" r="7" fill="#3fb950"/>
+    <text x="64" y="127">Plan the new search page</text>
+    <circle cx="26" cy="154" r="3.5" fill="none" stroke="#777" stroke-width="1.2"/>
+    <text x="42" y="159" fill="#bdbdbd">Write release notes</text>
+  </g>
+</svg>

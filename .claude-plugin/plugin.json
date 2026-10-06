@@ -1,0 +1,23 @@
+{
+  "name": "cache-keep-warm",
+  "displayName": "Cache Keep-Warm",
+  "version": "1.0.0",
+  "description": "Shows how long your session's prompt cache stays warm, and can keep it warm in the background while you are away",
+  "author": {
+    "name": "AndreiC81",
+    "url": "https://github.com/andreichiritescu"
+  },
+  "homepage": "https://github.com/andreichiritescu/claude-code-cache-keep-warm",
+  "repository": "https://github.com/andreichiritescu/claude-code-cache-keep-warm",
+  "license": "MIT",
+  "keywords": ["prompt-cache", "cache", "keep-warm", "countdown", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "title_mark": {
+      "type": "boolean",
+      "title": "Mark the session title",
+      "description": "While keep-warm is on, put a green dot in front of the session's title in the desktop app's session list",
+      "default": true
+    }
+  }
+}

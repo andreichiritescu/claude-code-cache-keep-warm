@@ -1,0 +1,15 @@
+{
+  "name": "cache-keep-warm",
+  "description": "Cache Keep-Warm, a Claude Code mod for your session's prompt cache",
+  "owner": {
+    "name": "AndreiC81",
+    "url": "https://github.com/andreichiritescu"
+  },
+  "plugins": [
+    {
+      "name": "cache-keep-warm",
+      "source": "./",
+      "description": "Shows how long your session's prompt cache stays warm, and can keep it warm in the background while you are away"
+    }
+  ]
+}
