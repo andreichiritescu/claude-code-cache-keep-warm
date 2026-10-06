@@ -78,10 +78,14 @@ const WAITS_TEXT = 'keep-warm starts after your next message'
 // "ok", and from then on the pings are invisible again. Same window, so never on a cold cache.
 const VISIBLE_PING_TEXT = 'Keep-warm ping from the Cache Keep-Warm mod. Reply with exactly "ok" and nothing else. Use no tools.'
 const SHOWS_IN_CHAT = ' (shows in chat)'
-// The visible ping is a real turn: after a restart Claude Code attaches the project's instruction
-// files to it (about 240k tokens in a big project), and a conversation filled past this share of
-// the window could then fail ("Prompt is too long") or be compacted, which a ping must never
-// cause. Above it keep-warm waits for the person's own message instead.
+// The visible ping is a real turn, and after a restart Claude Code re-sends the project's
+// instruction files (CLAUDE.md, the files it imports, MEMORY.md) with it: 130k tokens in a big
+// project. If the conversation, those files and this much room for the ping and its reply do not
+// fit in the window's free space (before the compaction reserve), the turn would fail ("Prompt is
+// too long") or be compacted, which a ping must never cause: keep-warm then waits for the
+// person's own message instead.
+const VISIBLE_PING_ROOM = 30_000
+// Only where Claude Code gives no breakdown of the window: wait above this share of it.
 const VISIBLE_PING_MAX_FILL = 0.75
 const NEARLY_FULL_TEXT = 'conversation nearly full: keep-warm waits for you'
 
@@ -105,6 +109,7 @@ const NEARLY_FULL = { plugin: 'cache-keep-warm', key: 'nearlyFull' } as const
 // the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY;
 // `savedTtl` is the length this session's own cache had when the store last saw it.
 // `visiblePingAt`: when a visible ping was submitted, until its request is seen.
+// `roomChecked`: whether this process has worked out if the visible ping fits.
 // `isFirstRequest`: the first request after a start says nothing about the cache's length.
 const live: {
   storeKey: string
@@ -115,6 +120,7 @@ const live: {
   savedTtl: KeepWarmTtl | undefined
   isFirstRequest: boolean
   visiblePingAt: number
+  roomChecked: boolean
 } = {
   storeKey: '',
   pingPendingUntil: 0,
@@ -124,6 +130,7 @@ const live: {
   savedTtl: undefined,
   isFirstRequest: true,
   visiblePingAt: 0,
+  roomChecked: false,
 }
 
 function minutes(ms: number) {
@@ -264,8 +271,9 @@ async function ping($: EngineInterface, startedAt: number, lastRequestAt: number
   if (!r.isAnswered && r.reason === 'nothing-to-fork') {
     // Claude Code has no request of this conversation to repeat yet: send the visible one.
     await $.state.set(WAITS, true)
-    const { value: nearlyFull = false } = await $.state.get(NEARLY_FULL)
-    if (!nearlyFull) await visiblePing($, startedAt)
+    const { value: contextTokens = 0 } = await $.state.get(CONTEXT)
+    const { context } = await $.session.usage()
+    if (!(await checkRoom($, context.window, contextTokens))) await visiblePing($, startedAt)
     return
   }
   if (!r.isAnswered && r.reason === 'api-error') {
@@ -293,6 +301,33 @@ async function ping($: EngineInterface, startedAt: number, lastRequestAt: number
   await save($)
 }
 
+// Whether the visible ping would not fit: the conversation, the instruction files Claude Code
+// re-sends after a restart, and the ping with its reply must all fit in the window's free space.
+// Claude Code estimates the breakdown locally (no request), from the same figures as /context.
+async function visiblePingWontFit($: EngineInterface, window: number, contextTokens: number) {
+  try {
+    const { breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
+    if (breakdown) {
+      const free = breakdown.categories.filter(c => c.kind === 'free').reduce((n, c) => n + c.tokens, 0)
+      const instructions = breakdown.memoryFiles.reduce((n, f) => n + f.tokens, 0)
+      return free < instructions + VISIBLE_PING_ROOM
+    }
+  } catch {
+    // No breakdown here: go by the share of the window below.
+  }
+  return window > 0 && contextTokens >= VISIBLE_PING_MAX_FILL * window
+}
+
+// Works out once per start, and only while the next ping would be the visible one, whether it
+// fits; the line shows the answer before the ping is due.
+async function checkRoom($: EngineInterface, window: number, contextTokens: number) {
+  live.roomChecked = true
+  const wontFit = await visiblePingWontFit($, window, contextTokens)
+  const { value: was = false } = await $.state.get(NEARLY_FULL)
+  if (wontFit !== was) await $.state.set(NEARLY_FULL, wontFit)
+  return wontFit
+}
+
 // The fallback ping: a real prompt, so it shows in the chat with Claude's "ok". Its request reads
 // the conversation from cache like the invisible ping, and the turn.step hook records it.
 async function visiblePing($: EngineInterface, startedAt: number) {
@@ -316,9 +351,6 @@ async function tick($: EngineInterface) {
   // answer, while the engine has none yet: keep that one until the engine has its own.
   const { value: knownContext = 0 } = await $.state.get(CONTEXT)
   const contextTokens = usage.context.tokens ?? knownContext
-  const nearlyFull = usage.context.window > 0 && contextTokens >= VISIBLE_PING_MAX_FILL * usage.context.window
-  const { value: wasNearlyFull = false } = await $.state.get(NEARLY_FULL)
-  if (nearlyFull !== wasNearlyFull) await $.state.set(NEARLY_FULL, nearlyFull)
   const shownKey = `${Math.floor(t / 60_000)}|${ttl?.ms ?? 0}|${ttl?.reason ?? ''}|${contextTokens}|${last}|${shortAfter}`
   if (shownKey !== live.shownKey) {
     live.shownKey = shownKey
@@ -329,6 +361,12 @@ async function tick($: EngineInterface) {
 
   const { value: isOn = false } = await $.state.get(KEEP_WARM)
   if (!isOn) return
+  // Invisible once the conversation has answered in this run; before that, the visible ping,
+  // whose fit is worked out once so the line can say in advance when it has to wait.
+  const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
+  const { value: waits = false } = await $.state.get(WAITS)
+  const needsVisible = !sawResponse || waits
+  if (needsVisible && !live.roomChecked) await checkRoom($, usage.context.window, contextTokens)
   const { value: stopAt = 0 } = await $.state.get(STOP_AT)
   if (stopAt > 0 && t >= stopAt) {
     await setKeepWarm($, false, 0)
@@ -351,10 +389,8 @@ async function tick($: EngineInterface) {
     return
   }
   live.pingPendingUntil = t + PING_PENDING_MS
-  // Invisible once the conversation has answered in this run; before that, the visible ping.
-  const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
-  const { value: waits = false } = await $.state.get(WAITS)
-  if (sawResponse && !waits) await ping($, t, last)
+  const { value: nearlyFull = false } = await $.state.get(NEARLY_FULL)
+  if (!needsVisible) await ping($, t, last)
   else if (!nearlyFull) await visiblePing($, t)
 }
 
@@ -437,6 +473,7 @@ export const register: Register = (on, options) => {
       await $.state.set(CONTEXT, 0)
       await $.state.set(PING_ERROR, '')
       await $.state.set(NOW, t)
+      live.roomChecked = false
       const { value: restored = false } = await $.state.get(RESTORED)
       if (restored) await save($)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {

@@ -1,7 +1,7 @@
 {
   "name": "cache-keep-warm",
   "displayName": "Cache Keep-Warm",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Shows how long your session's prompt cache stays warm, and can keep it warm in the background while you are away",
   "author": {
     "name": "AndreiC81",

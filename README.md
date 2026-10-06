@@ -106,7 +106,7 @@ Keep-warm is **off by default** and you switch it **per session**: only the sess
 | **40 min left (14:12)** | Time left, and the clock time the cache expires if nothing happens. |
 | **next ping 14:07** | When keep-warm will read the cache next. **(shows in chat)** means this ping is a short visible message, because the session hasn't answered since the app restarted. |
 | **3 pings ✓** | Pings so far, and whether the last one found the cache warm (✓) or cold (✗). |
-| **conversation nearly full: keep-warm waits for you** | The next ping would have to be the visible one (after a restart), and in a conversation this full it could fail or make Claude Code compact it. So keep-warm waits for your own next message. |
+| **conversation nearly full: keep-warm waits for you** | After a restart the next ping has to be the visible one, and Claude Code re-sends your project's instruction files (`CLAUDE.md`, the files it imports, `MEMORY.md`) with it. Here those would not fit next to the conversation: the ping would fail or make Claude Code compact the conversation. So keep-warm waits for your own next message. |
 | **ping failed: …** | The last ping never reached the model, with the reason Claude Code gave. "Prompt is too long" means the conversation is over the model's limit: run `/compact` in that session. The cache then expires normally. |
 | **keep-warm starts after your next message** | Keep-warm is on but doesn't know your cache length yet. That only happens before the first answer after you install the mod. |
 | **773k cached** | The size of your conversation, which is what your next message would re-write if the cache went cold. |
@@ -211,7 +211,7 @@ With the setting **Mark the session title** off, the mod never adds the mark; it
 ### What it reads
 
 - **Your Claude Code settings**, for `promptCacheTtl` only, and three environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, to know how long your cache lasts. Claude Code hands a mod the settings as one object: this mod looks at `promptCacheTtl` and nothing else, and keeps or sends no other setting, credential or API key.
-- **This session's figures** from Claude Code: the conversation's size, the cache tokens of each request, and whether your plan's usage limits are reported (which tells a subscription from an API key).
+- **This session's figures** from Claude Code: the conversation's size, the cache tokens of each request, and whether your plan's usage limits are reported (which tells a subscription from an API key). After a restart, while the next ping would be the visible one, also the free space left in the context window and the size of the instruction files (their token counts only, never their text), to check the visible ping fits.
 - **When you reopen a session**, what Claude Code tells mods at that moment: how long ago the session's last answer came and how big the conversation is. That lets the countdown carry on before your first message.
 - **The clock.**
 
