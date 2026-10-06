@@ -105,6 +105,7 @@ Keep-warm is **off by default** and you switch it **per session**: only the sess
 | **40 min left (14:12)** | Time left, and the clock time the cache expires if nothing happens. |
 | **next ping 14:07** | When keep-warm will read the cache next. |
 | **3 pings ✓** | Pings so far, and whether the last one found the cache warm (✓) or cold (✗). |
+| **keep-warm starts after your next message** | Keep-warm is on, but Claude Code has nothing to repeat yet, for example right after `/clear`. The first ping follows your next message. |
 | **773k cached** | The size of your conversation, which is what your next message would re-write if the cache went cold. |
 
 <br>
@@ -133,6 +134,8 @@ flowchart LR
 1. **Your settings**, if you set one: `promptCacheTtl`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `FORCE_PROMPT_CACHING_5M` or `ENABLE_PROMPT_CACHING_1H`.
 2. **Otherwise your plan.** A Claude subscription within its usage limits gets one hour. Once you are over the limit (paying with usage credits), or on an API key or a cloud provider, it is five minutes.
 3. **Then it checks what really happens.** Every request shows whether it read the conversation from the cache or had to re-write it. If the cache went cold sooner than expected, keep-warm pauses and tells you, and resumes once the cache is seen lasting again. So if Claude Code ever changes how long the cache lasts, the mod follows.
+
+Claude Code reports your plan only with an answer, so after a restart the mod uses the length your plan showed last time until the session answers again.
 
 Keep-warm only pings a cache that lasts **30 minutes or more**: on the five-minute cache, pinging every few minutes would cost more than it saves.
 
@@ -204,19 +207,21 @@ With the setting **Mark the session title** off, the mod never adds the mark; it
 
 - **Your Claude Code settings**, for `promptCacheTtl` only, and three environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, to know how long your cache lasts. Claude Code hands a mod the settings as one object: this mod looks at `promptCacheTtl` and nothing else, and keeps or sends no other setting, credential or API key.
 - **This session's figures** from Claude Code: the conversation's size, the cache tokens of each request, and whether your plan's usage limits are reported (which tells a subscription from an API key).
+- **When you reopen a session**, what Claude Code tells mods at that moment: how long ago the session's last answer came and how big the conversation is. That lets the countdown carry on before your first message.
 - **The clock.**
 
 It checks these every 15 seconds, on your computer, and sends none of them anywhere. It does not read your files.
 
 ### What it keeps
 
-Per session, in Claude Code's plugin storage on your computer: the time of the last request, whether keep-warm is on, and the stop time you gave it. A session untouched for a week is forgotten.
+Per session, in Claude Code's plugin storage on your computer: the time of the last request, whether keep-warm is on, and the stop time you gave it. A session untouched for a week is forgotten. Shared by your sessions, it also keeps the last cache length your plan showed (one hour or five minutes), so a session you reopen knows it before its first answer.
 
 ### The events it hooks
 
 | Event | What the mod does with it |
 | --- | --- |
 | Session start | Adds the `/keepwarm` command and starts its 15-second local check |
+| A session is reopened or cleared (Claude Code's `SessionStart` hook) | Reads how long ago the last answer came and the conversation's size, so the countdown carries on; after `/clear`, starts the countdown over. Changes nothing. |
 | Each request of the main conversation | Notes the time and how much was read from the cache. Changes nothing. Subagents' requests are ignored. |
 | A turn ends | Notes that an answer arrived (which helps tell a subscription from an API key) |
 | Claude's `AskUserQuestion` tool | Shows "waiting for your answer" while the question is open. Never changes the question or your answer. |

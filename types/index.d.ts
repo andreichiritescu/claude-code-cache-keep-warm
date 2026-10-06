@@ -6,7 +6,8 @@ export type KeepWarmPing = { at: number; isHit: boolean; read: number }
 
 /**
  * How long the main conversation's cache lives, and why: from a setting, from the plan, or
- * corrected by what the cache actually did. Null until it can be told.
+ * corrected by what the cache actually did. Null until it can be told. The last one the plan
+ * showed is also kept in `$.store` under `plan-ttl`, shared by every session.
  */
 export type KeepWarmTtl = { ms: number; reason: 'subscription' | 'api' | 'overage' | 'setting' | 'observed' } | null
 
@@ -33,6 +34,10 @@ declare module 'claude-code' {
       sawResponse: boolean
       /** The idle gap after which the cache was found cold although it should have lasted; 0 = none seen. */
       shortAfterMs: number
+      /** True when a ping found nothing to repeat yet (a new session, or after /clear), until the next request. */
+      waitsForMessage: boolean
+      /** True once this process has restored the session's saved values from the store. */
+      restored: boolean
     }
   }
 }

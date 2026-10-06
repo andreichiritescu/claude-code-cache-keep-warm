@@ -30,6 +30,10 @@ const HIT_SHARE = 0.5
 // A re-write after a shorter gap is a change to the prompt (compaction, a model switch),
 // not an expiry, so it says nothing about the cache's length.
 const EVIDENCE_GAP_MS = FIVE_MIN_MS + 30_000
+// A reopened session reports how long ago its last answer came. Its cache's life began when
+// that last request was sent, a little earlier: counting from this much before the answer keeps
+// the ping early rather than late (a late ping would re-write a cache that already went cold).
+const RESUME_MARGIN_MS = 3 * 60_000
 // With keep-warm off, the band names what is at stake once this little time is left.
 const EXPIRING_MS = 10 * 60_000
 // Blocks that empty over the cache's life: filled blocks green while keep-warm is on (grey
@@ -58,12 +62,17 @@ const PING_TEXT = 'Keep-warm ping. Reply with just "ok".'
 const COMMAND = 'keepwarm'
 const STORE_PREFIX = 'session:'
 const STORE_MAX_AGE_MS = 7 * 24 * HOUR_MS
+// Shared by every session: the cache length the plan showed last. Claude Code reports the plan
+// only with a response, so a session reopened after a relaunch would otherwise not know its
+// cache length (and could not keep it warm) until its first answer.
+const PLAN_TTL_KEY = 'plan-ttl'
 // Rate-limit windows that only a Claude subscription reports; an API key or a cloud provider reports none.
 const PLAN_WINDOWS = ['five_hour', 'seven_day']
 const PLAN_LIMIT_PERCENT = 100
 const TTL_VALUE = /^(\d+)\s*(s|m|h)$/
 const DURATION = /^(\d+(?:\.\d+)?)\s*(h|m|min)$/
 const UNTIL = /^until\s+(\d{1,2}):(\d{2})$/
+const WAITS_TEXT = 'keep-warm starts after your next message'
 
 const LAST = { plugin: 'cache-keep-warm', key: 'lastRequestAt' } as const
 const KEEP_WARM = { plugin: 'cache-keep-warm', key: 'keepWarm' } as const
@@ -75,11 +84,21 @@ const CONTEXT = { plugin: 'cache-keep-warm', key: 'contextTokens' } as const
 const WAITING = { plugin: 'cache-keep-warm', key: 'isWaiting' } as const
 const SAW_RESPONSE = { plugin: 'cache-keep-warm', key: 'sawResponse' } as const
 const SHORT_AFTER = { plugin: 'cache-keep-warm', key: 'shortAfterMs' } as const
+const WAITS = { plugin: 'cache-keep-warm', key: 'waitsForMessage' } as const
+const RESTORED = { plugin: 'cache-keep-warm', key: 'restored' } as const
 
 // The module's own variables start over on a reload; what must survive one is in $.state.
 // `titleMark` is the user's "Mark the session title" setting; changing it in /config reloads
-// the module, so it is read once in register().
-const live = { storeKey: '', pingPendingUntil: 0, shownKey: '', titleMark: true }
+// the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY.
+// `isFirstRequest`: the first request after a start says nothing about the cache's length.
+const live: {
+  storeKey: string
+  pingPendingUntil: number
+  shownKey: string
+  titleMark: boolean
+  planTtl: KeepWarmTtl | undefined
+  isFirstRequest: boolean
+} = { storeKey: '', pingPendingUntil: 0, shownKey: '', titleMark: true, planTtl: undefined, isFirstRequest: true }
 
 function minutes(ms: number) {
   return Math.max(0, Math.floor(ms / 60_000))
@@ -110,6 +129,16 @@ function parseTtl(value: unknown) {
   return Number(m[1]) * (m[2] === 'h' ? HOUR_MS : m[2] === 'm' ? 60_000 : 1000)
 }
 
+// Keeps what the plan showed for the next session that opens before its first answer; written
+// only when it changes, though this runs on every check.
+async function rememberPlan($: EngineInterface, ttl: NonNullable<KeepWarmTtl>): Promise<KeepWarmTtl> {
+  if (live.planTtl?.ms !== ttl.ms || live.planTtl?.reason !== ttl.reason) {
+    live.planTtl = ttl
+    await $.store.set(PLAN_TTL_KEY, ttl)
+  }
+  return ttl
+}
+
 // The same precedence Claude Code itself applies, then the plan: a subscription within its
 // limits gets the hour, one over its limit (paying usage credits) and an API key get 5 minutes.
 async function detectTtl($: EngineInterface, usage: SessionUsage): Promise<KeepWarmTtl> {
@@ -123,13 +152,16 @@ async function detectTtl($: EngineInterface, usage: SessionUsage): Promise<KeepW
 
   const plan = usage.rateLimits.filter(w => PLAN_WINDOWS.includes(w.kind))
   if (plan.length === 0) {
-    // The windows arrive with the first response, so before one an empty list proves nothing.
+    // The windows arrive with the first response, so before one an empty list proves nothing:
+    // until then, go by what the plan showed last time, in any session.
     const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
-    return sawResponse ? { ms: FIVE_MIN_MS, reason: 'api' } : null
+    if (!sawResponse) return live.planTtl ?? null
+    return rememberPlan($, { ms: FIVE_MIN_MS, reason: 'api' })
   }
-  return plan.some(w => w.percentUsed >= PLAN_LIMIT_PERCENT)
-    ? { ms: FIVE_MIN_MS, reason: 'overage' }
-    : { ms: HOUR_MS, reason: 'subscription' }
+  return rememberPlan(
+    $,
+    plan.some(w => w.percentUsed >= PLAN_LIMIT_PERCENT) ? { ms: FIVE_MIN_MS, reason: 'overage' } : { ms: HOUR_MS, reason: 'subscription' },
+  )
 }
 
 // What the cache actually did beats what the settings say: if it went cold after a gap it
@@ -200,7 +232,12 @@ async function syncTitle($: EngineInterface) {
 // message, and runs even while the session waits on a question or a permission prompt.
 async function ping($: EngineInterface, startedAt: number, lastRequestAt: number) {
   const r = await $.model.fork({ prompt: PING_TEXT })
-  if (!r.isAnswered && r.reason === 'nothing-to-fork') return
+  if (!r.isAnswered && r.reason === 'nothing-to-fork') {
+    // Claude Code has no request of this conversation to repeat yet (a new session before its
+    // first answer, or right after /clear), and none comes until the next message: say so.
+    await $.state.set(WAITS, true)
+    return
+  }
   if (!r.isAnswered && r.reason === 'api-error') {
     $.ui.toast(`Keep-warm ping failed (HTTP ${r.status ?? '?'}); retrying in ${PING_RETRY_MS / 1000} s.`)
     live.pingPendingUntil = startedAt + PING_RETRY_MS
@@ -226,8 +263,10 @@ async function tick($: EngineInterface) {
   const { value: last = 0 } = await $.state.get(LAST)
 
   // Redraw only when what the band shows would change: each minute, and whenever the cache
-  // length or the context size moves.
-  const contextTokens = usage.context.tokens ?? 0
+  // length or the context size moves. A reopened session reports its size before its first
+  // answer, while the engine has none yet: keep that one until the engine has its own.
+  const { value: knownContext = 0 } = await $.state.get(CONTEXT)
+  const contextTokens = usage.context.tokens ?? knownContext
   const shownKey = `${Math.floor(t / 60_000)}|${ttl?.ms ?? 0}|${ttl?.reason ?? ''}|${contextTokens}|${last}|${shortAfter}`
   if (shownKey !== live.shownKey) {
     live.shownKey = shownKey
@@ -244,6 +283,9 @@ async function tick($: EngineInterface) {
     $.ui.toast(`Keep-warm stopped at ${clockTime(stopAt)} as asked; the cache will expire normally.`)
     return
   }
+  // Nothing to repeat until the next message: trying again would only get the same answer.
+  const { value: waits = false } = await $.state.get(WAITS)
+  if (waits) return
 
   const idle = t - last
   const isPingWindow =
@@ -288,15 +330,24 @@ export const register: Register = (on, options) => {
     })
 
     live.storeKey = STORE_PREFIX + (await $.session.id())
+    live.isFirstRequest = true
+    const plan = (await $.store.get(PLAN_TTL_KEY)) as KeepWarmTtl | undefined
+    if (plan && typeof plan.ms === 'number') live.planTtl = plan
+
     // After an app relaunch the session's values are gone; the store keeps them per session id.
-    const { value: known = 0 } = await $.state.get(LAST)
-    if (known === 0) {
+    // A reopened session may already have its last answer's time from Claude Code (the
+    // classic.SessionStart hook below, which can run before or after this one): keep the later.
+    const { value: restored = false } = await $.state.get(RESTORED)
+    if (!restored) {
       const saved = (await $.store.get(live.storeKey)) as KeepWarmSaved | undefined
       if (saved) {
-        await $.state.set(LAST, saved.lastRequestAt)
+        const { value: last = 0 } = await $.state.get(LAST)
+        if (saved.lastRequestAt > last) await $.state.set(LAST, saved.lastRequestAt)
         await $.state.set(KEEP_WARM, saved.keepWarm)
         await $.state.set(STOP_AT, saved.stopAt ?? 0)
       }
+      await $.state.set(RESTORED, true)
+      await save($)
     }
 
     // Forget sessions untouched for a week so the store stays small.
@@ -315,6 +366,27 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // A session reopened (an app relaunch, a resume): Claude Code says how long ago its last
+  // answer came and how big the conversation is, so the countdown carries on before the first
+  // message. After /clear the conversation starts over and there is no cache to count down.
+  on('classic.SessionStart', async ($, e, next) => {
+    const t = await $.clock.now()
+    if (e.source === 'clear') {
+      await $.state.set(LAST, 0)
+      await $.state.set(PINGS, [])
+      await $.state.set(NOW, t)
+      await save($)
+    } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
+      const lastAt = t - e.seconds_since_last_response * 1000 - RESUME_MARGIN_MS
+      const { value: last = 0 } = await $.state.get(LAST)
+      if (lastAt > last) await $.state.set(LAST, lastAt)
+      if (e.context_tokens) await $.state.set(CONTEXT, e.context_tokens)
+      await $.state.set(NOW, t)
+      await save($)
+    }
+    return next(e)
+  })
+
   // Each model request of the main conversation (not a subagent's: its cache is its own):
   // it restarts the cache's life, and its usage shows whether the cache outlived the gap.
   on('turn.step', async function* ($, e, next) {
@@ -324,9 +396,14 @@ export const register: Register = (on, options) => {
     live.pingPendingUntil = 0
     await $.state.set(LAST, t)
     await $.state.set(NOW, t)
+    await $.state.set(WAITS, false)
     await save($)
     const result = yield* next(e)
-    if (result?.usage && previous > 0) await observe($, t - previous, result.usage)
+    // Not the first request after a start: a restart can change the prompt itself (a new
+    // Claude Code version), which re-writes the cache whatever the gap, so it proves nothing.
+    const isFirst = live.isFirstRequest
+    live.isFirstRequest = false
+    if (result?.usage && previous > 0 && !isFirst) await observe($, t - previous, result.usage)
     return result
   })
 
@@ -361,11 +438,13 @@ export const register: Register = (on, options) => {
     const { value: stopAt = 0 } = await $.state.get(STOP_AT)
     const { value: ttl = null } = await $.state.get(TTL)
     const { value: pings = [] } = await $.state.get(PINGS)
+    const { value: waits = false } = await $.state.get(WAITS)
     const lines = [
       isOn
         ? `Keep-warm on${stopAt ? ` until ${clockTime(stopAt)}` : ` (stops itself after ${MAX_PINGS} pings)`}: about ${minutes(PING_LEAD_MS)} min before the cache would expire, it re-reads the conversation from cache in the background. A cold cache is never pinged.`
         : 'Keep-warm off: the cache expires normally.',
     ]
+    if (isOn && waits) lines.push('Claude Code has no request of this conversation to repeat yet, so keep-warm starts after your next message.')
     if (ttl) lines.push(`This session's cache lasts ${cacheLength(ttl.ms)} (${ttl.reason === 'observed' ? 'seen expiring sooner than expected' : ttl.reason}).`)
     if (ttl && ttl.ms < KEEP_WARM_MIN_TTL_MS) lines.push(`Keep-warm only pings a cache of ${minutes(KEEP_WARM_MIN_TTL_MS)} min or longer.`)
     for (const p of pings.slice(-HISTORY_SHOWN)) {
@@ -387,12 +466,13 @@ export const register: Register = (on, options) => {
     const { value: contextTokens = 0 } = await $.state.get(CONTEXT)
     const { value: isWaiting = false } = await $.state.get(WAITING)
     const { value: shortAfter = 0 } = await $.state.get(SHORT_AFTER)
+    const { value: waits = false } = await $.state.get(WAITS)
 
     const t = Math.max(now, last)
     const ttlMs = ttl?.ms ?? HOUR_MS
     const canKeepWarm = ttl !== null && ttl.ms >= KEEP_WARM_MIN_TTL_MS
     // Green only while keep-warm is on and able to ping; everything else stays default grey.
-    const isGreen = isOn && canKeepWarm
+    const isGreen = isOn && canKeepWarm && !waits
     const expiresAt = last + ttlMs
     const remaining = expiresAt - t
     const isWarm = last > 0 && remaining > 0
@@ -417,7 +497,9 @@ export const register: Register = (on, options) => {
     } else if (isOn) {
       const lastPing = pings[pings.length - 1]
       if (stopAt) parts.push(`keep-warm stops ${clockTime(stopAt)}`)
-      if (isWarm) parts.push(`next ping ${clockTime(last + ttlMs - PING_LEAD_MS)}`)
+      // No ping can go out yet: Claude Code has nothing to repeat, or the cache length is unknown.
+      if (waits || !ttl) parts.push(WAITS_TEXT)
+      else if (isWarm) parts.push(`next ping ${clockTime(last + ttlMs - PING_LEAD_MS)}`)
       if (lastPing) parts.push(`${pings.length} ping${pings.length === 1 ? '' : 's'} ${lastPing.isHit ? '✓' : '✗'}`)
     }
 

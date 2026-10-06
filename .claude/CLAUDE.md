@@ -14,6 +14,7 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 
 - `claude plugin validate --strict .` checks the marketplace; `claude plugin validate --strict ./.claude-plugin/plugin.json` checks the plugin and the hooks module. The `hooks:` and `calls:` lines list everything the module does.
 - The mod API is declared in `.claude-plugin/types/claude-code/index.d.ts`, which Claude Code writes when it loads the mod (gitignored). Grep it for an event or a `$` method. The built-in `plugin-authoring` skill explains the API.
+- To test the public install from scratch, point `CLAUDE_CONFIG_DIR` at a fresh, SHORT temp folder (a long path fails with "Filename too long"), unset `CLAUDE_CODE_PLUGIN_DIRS`, then run the README's terminal commands. Install instructions use the full HTTPS address: the `owner/repo` form makes Claude Code try SSH first.
 - Glyphs and spacing render differently in the desktop app than in a browser preview: test them in the real line (a temporary test row), never only in a mock.
 
 ## Mod API lessons (Claude Code 2.1.286)
@@ -27,7 +28,11 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 - The keep-warm ping is `$.model.fork`: it re-sends the main thread's last request outside the conversation, reads the cache and restarts its hour (verified: 1 h 43 min idle stayed warm with two pings), and it works while an AskUserQuestion waits. `$.prompt.submit` did not: a queued prompt waits until the session is idle.
 - Subscription vs API key: `$.session.usage().rateLimits` holds `five_hour` / `seven_day` windows only on a subscription (empty before the first response). Any window at 100% or more means over the plan limit, which drops Claude Code to the 5-minute cache.
 - The session-title mark uses the desktop app's own tools through `$.tool.call`: `mcp__ccd_session_mgmt__get_session` (`session_id: "self"`) and `mcp__ccd_session_mgmt__set_session_title`. They are permission-"allow"; the app itself asks before renaming a title the user typed. In a terminal these tools do not exist and the call rejects (caught).
-- `$.state` is per session and survives a reload; `$.store` is shared by every session (per plugin and load path); module variables reset on reload.
+- `$.state` is per session and survives a reload; `$.store` is shared by every session (per plugin and load path); module variables reset on reload. An app relaunch empties `$.state`: the mod restores per-session values from the store. Moving the plugin folder changes the load path, so the stored sessions are lost.
+- After a relaunch `rateLimits` stays empty until the session's first answer, so the mod keeps the last plan-based cache length in `$.store` (`plan-ttl`) and uses it until then.
+- Mods can hook classic events: `classic.SessionStart` on a resume or fork carries `seconds_since_last_response` and `context_tokens`, which the mod uses to carry the countdown on in a reopened session (counting from 3 minutes before that answer, so the ping is early rather than late). `source: 'clear'` resets it.
+- `$.model.fork` answers `nothing-to-fork` before the conversation's first answer and right after `/clear`; the line then says "keep-warm starts after your next message" instead of a ping time.
+- Never copy the mod into `~/.claude/dev-mods/<session>/`: next to the folder in `CLAUDE_CODE_PLUGIN_DIRS` it loads twice. Old copies there broke the line after a restart (2026-10-06).
 
 ## Behaviour agreed with the owner
 
@@ -40,4 +45,6 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 
 - Bump `version` in `.claude-plugin/plugin.json` for every release: marketplace installs stay on the old version until it changes.
 - Repository: https://github.com/andreichiritescu/claude-code-cache-keep-warm (MIT).
+- Anthropic plugin directory: submitted 2026-10-06, https://claude.ai/directory/manage/plugins/69d31aba-5641-4f5e-ae46-f640957be779. It re-reads `main` about every 6 hours and auto-publishes versions that pass their checks.
+- The README section "What it runs, reads and sends" is the plugin's privacy policy (`privacyPolicyUrl`) and what the directory's reviewer checks the mod against. Update it in the same change whenever the mod calls a new tool, reads or stores something new, or sends anything new.
 - The owner commits and pushes. Do not commit or push unless asked.
