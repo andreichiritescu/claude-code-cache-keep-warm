@@ -14,6 +14,8 @@
   "icon": "./docs/images/icon.png",
   "documentationUrl": "https://github.com/andreichiritescu/claude-code-cache-keep-warm#readme",
   "supportUrl": "https://github.com/andreichiritescu/claude-code-cache-keep-warm/issues",
+  "privacyPolicyUrl": "https://github.com/andreichiritescu/claude-code-cache-keep-warm#what-it-runs-reads-and-sends",
+  "termsOfServiceUrl": "https://github.com/andreichiritescu/claude-code-cache-keep-warm/blob/main/LICENSE",
   "types": "./types/index.d.ts",
   "userConfig": {
     "title_mark": {

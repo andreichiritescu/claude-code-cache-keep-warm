@@ -154,28 +154,6 @@ In the desktop app, renaming a title **you typed yourself** asks for your approv
 </details>
 
 <details>
-<summary><b>Privacy and safety</b></summary>
-
-<br>
-
-A mod runs inside Claude Code with your permissions. This one:
-
-- makes **no network calls of its own**. The only thing it sends is the ping, through Claude Code, to Anthropic, with your own account.
-- reads your Claude Code settings and three environment variables (listed above) to learn how long your cache lasts.
-- stores, per session, only the time of the last request, whether keep-warm is on, and the stop time you gave it.
-- in the desktop app, reads and renames the current session's title (if that setting is on).
-
-To see everything it does before you install it, clone this repository and run:
-
-```bash
-claude plugin validate ./claude-code-cache-keep-warm
-```
-
-The `hooks:` and `calls:` lines list every event it handles and everything it asks Claude Code to do.
-
-</details>
-
-<details>
 <summary><b>Questions</b></summary>
 
 <br>
@@ -196,6 +174,62 @@ In VS Code's chat panel, in `claude -p` runs and in cloud sessions.
 `claude plugin uninstall cache-keep-warm@cache-keep-warm`
 
 </details>
+
+<br>
+
+## What it runs, reads and sends
+
+A mod runs inside Claude Code with your permissions, so here is everything this one does. It has no server, makes no network calls of its own, and runs no shell commands. This section is also its privacy policy: the mod collects nothing about you, and nothing reaches its author.
+
+### What leaves your computer
+
+Only the **keep-warm ping**, and only while keep-warm is on: about 5 minutes before the cache would expire, so about once every 55 minutes.
+
+The mod asks Claude Code to send this session's last request again, with one line added: `Keep-warm ping. Reply with just "ok".` (the `$.model.fork` call in [`hooks/register.tsx`](hooks/register.tsx)). It goes **to Anthropic, through Claude Code's own connection, on your own account**, like any message you send. That request reads your conversation from the cache, which is what keeps it warm. The answer is thrown away, and nothing is added to your conversation.
+
+The mod itself never reads what your conversation says: from each request it only takes the usage figures (how many tokens were read from the cache or written to it).
+
+### The tools it calls itself
+
+Only on the current session. Both are the Claude desktop app's own session tools, and nothing they do leaves your computer:
+
+| Tool | What it does | When |
+| --- | --- | --- |
+| `mcp__ccd_session_mgmt__get_session` | Reads the session's title | When the session starts, when you switch keep-warm on or off, and every 5 minutes |
+| `mcp__ccd_session_mgmt__set_session_title` | Puts 🟢 in front of the title, or takes it off | Only when the mark has to change |
+
+With the setting **Mark the session title** off, the mod never adds the mark; it still reads the title at those moments, to take off a mark left from before. In a terminal these tools do not exist: the call fails quietly and nothing changes.
+
+### What it reads
+
+- **Your Claude Code settings**, for `promptCacheTtl` only, and three environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, to know how long your cache lasts. Claude Code hands a mod the settings as one object: this mod looks at `promptCacheTtl` and nothing else, and keeps or sends no other setting, credential or API key.
+- **This session's figures** from Claude Code: the conversation's size, the cache tokens of each request, and whether your plan's usage limits are reported (which tells a subscription from an API key).
+- **The clock.**
+
+It checks these every 15 seconds, on your computer, and sends none of them anywhere. It does not read your files.
+
+### What it keeps
+
+Per session, in Claude Code's plugin storage on your computer: the time of the last request, whether keep-warm is on, and the stop time you gave it. A session untouched for a week is forgotten.
+
+### The events it hooks
+
+| Event | What the mod does with it |
+| --- | --- |
+| Session start | Adds the `/keepwarm` command and starts its 15-second local check |
+| Each request of the main conversation | Notes the time and how much was read from the cache. Changes nothing. Subagents' requests are ignored. |
+| A turn ends | Notes that an answer arrived (which helps tell a subscription from an API key) |
+| Claude's `AskUserQuestion` tool | Shows "waiting for your answer" while the question is open. Never changes the question or your answer. |
+| The `/keepwarm` command | Answers its own command, and no other |
+| The line above the prompt | Draws the countdown line |
+
+To check all of this before you install it, clone the repository and run:
+
+```bash
+claude plugin validate ./claude-code-cache-keep-warm/.claude-plugin/plugin.json
+```
+
+The `hooks:`, `calls:` and `env reads:` lines list every event the mod handles, everything it asks Claude Code to do, and every environment variable it reads.
 
 <br>
 
