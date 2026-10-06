@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="64" viewBox="0 0 880 64" role="img" aria-labelledby="t d">
+  <title id="t">The Cache Keep-Warm line</title>
+  <desc id="d">A dark line above the Claude Code prompt: a green circle three-quarters full, seven of ten green blocks, then "40 min left (14:12) · next ping 14:07 · 773k cached" and a Stop button.</desc>
+  <rect x="0.5" y="0.5" width="879" height="63" rx="12" fill="#1f1f1f" stroke="#2c2c2c"/>
+  <g transform="translate(30 32)">
+    <circle r="8" fill="none" stroke="#3fb950" stroke-width="1.6"/>
+    <path d="M0 0 L0 -8 A8 8 0 1 1 -8 0 Z" fill="#3fb950"/>
+  </g>
+  <g fill="#3fb950">
+    <path d="M58 37 L62 27 L72 27 L68 37 Z"/>
+    <path d="M73 37 L77 27 L87 27 L83 37 Z"/>
+    <path d="M88 37 L92 27 L102 27 L98 37 Z"/>
+    <path d="M103 37 L107 27 L117 27 L113 37 Z"/>
+    <path d="M118 37 L122 27 L132 27 L128 37 Z"/>
+    <path d="M133 37 L137 27 L147 27 L143 37 Z"/>
+    <path d="M148 37 L152 27 L162 27 L158 37 Z"/>
+  </g>
+  <g fill="none" stroke="#6e7681" stroke-width="1.2">
+    <path d="M163.6 36.4 L167.4 27.6 L176.4 27.6 L172.6 36.4 Z"/>
+    <path d="M178.6 36.4 L182.4 27.6 L191.4 27.6 L187.6 36.4 Z"/>
+    <path d="M193.6 36.4 L197.4 27.6 L206.4 27.6 L202.6 36.4 Z"/>
+  </g>
+  <text x="228" y="37.5" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9a9a9a"><tspan fill="#ededed" font-weight="600">40 min left</tspan><tspan> (14:12)</tspan><tspan dx="12">·</tspan><tspan dx="12">next ping 14:07</tspan><tspan dx="12">·</tspan><tspan dx="12">773k cached</tspan></text>
+  <rect x="796" y="17" width="68" height="30" rx="7" fill="#2b2b2b" stroke="#3d3d3d"/>
+  <text x="830" y="37" text-anchor="middle" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#ededed">Stop</text>
+</svg>
