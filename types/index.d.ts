@@ -1,5 +1,8 @@
-/** What the mod remembers per session id in `$.store`, so a relaunch keeps it. */
-export type KeepWarmSaved = { lastRequestAt: number; keepWarm: boolean; stopAt: number }
+/**
+ * What the mod remembers per session id in `$.store`, so a relaunch keeps it. `ttl` is the cache
+ * length in effect when it was saved (absent in entries from before 1.0.3).
+ */
+export type KeepWarmSaved = { lastRequestAt: number; keepWarm: boolean; stopAt: number; ttl?: KeepWarmTtl }
 
 /** One keep-warm ping: when it started, whether the cache still held the conversation, how much it read. */
 export type KeepWarmPing = { at: number; isHit: boolean; read: number }
@@ -30,14 +33,21 @@ declare module 'claude-code' {
       contextTokens: number
       /** True while Claude waits on an answer to its question. */
       isWaiting: boolean
-      /** True once this process has seen a main-thread response (so an empty plan list means an API key). */
+      /**
+       * True once this process has seen a main-thread response: the ping can then be invisible (a
+       * fork), and an empty plan list then means an API key. Reset by /clear.
+       */
       sawResponse: boolean
       /** The idle gap after which the cache was found cold although it should have lasted; 0 = none seen. */
       shortAfterMs: number
-      /** True when a ping found nothing to repeat yet (a new session, or after /clear), until the next request. */
+      /** True when the invisible ping found nothing to repeat, so the visible one is used, until the next request. */
       waitsForMessage: boolean
       /** True once this process has restored the session's saved values from the store. */
       restored: boolean
+      /** Why the last ping did not reach the model (Claude Code's words or the HTTP status); '' = none. */
+      pingError: string
+      /** True while the conversation fills too much of the context window for a visible ping. */
+      nearlyFull: boolean
     }
   }
 }

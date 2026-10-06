@@ -31,15 +31,20 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 - `$.state` is per session and survives a reload; `$.store` is shared by every session (per plugin and load path); module variables reset on reload. An app relaunch empties `$.state`: the mod restores per-session values from the store. Moving the plugin folder changes the load path, so the stored sessions are lost.
 - After a relaunch `rateLimits` stays empty until the session's first answer, so the mod keeps the last plan-based cache length in `$.store` (`plan-ttl`) and uses it until then.
 - Mods can hook classic events: `classic.SessionStart` on a resume or fork carries `seconds_since_last_response` and `context_tokens`, which the mod uses to carry the countdown on in a reopened session (counting from 3 minutes before that answer, so the ping is early rather than late). `source: 'clear'` resets it.
-- `$.model.fork` answers `nothing-to-fork` before the conversation's first answer and right after `/clear`; the line then says "keep-warm starts after your next message" instead of a ping time.
+- `$.model.fork` answers `nothing-to-fork` until the conversation has answered in this process: after an app relaunch (verified 2026-10-06) and right after `/clear`. The mod knows this in advance from `sawResponse` (empty after a relaunch, reset by `/clear`), shows "next ping HH:MM (shows in chat)", and sends that ping as a real message with `$.prompt.submit` (Claude answers "ok"); later pings are invisible again.
+- A turn that dies before an answer (`turn.complete` `reason: 'error'`, no `usage`; for example Claude Code's own "Prompt is too long") reaches no cache. Only a turn with `usage` counts as an answer (`sawResponse`); counting the failed one made the mod read the empty plan list as "5-minute cache (API key)". A `turn.step` with zero usage puts `lastRequestAt` back. A failed visible ping shows "ping failed: <Claude Code's words>".
+- After a restart Claude Code attaches the project's instruction files to the first prompt (957 KB in the RealEstate project, 2026-10-06), so the visible ping can overflow a nearly full conversation or trigger a compaction. The mod sends it only below 75% of the context window; above that the line says "conversation nearly full: keep-warm waits for you".
+- `classic.SessionStart` with `source: 'compact'` (after `/compact`) starts the countdown over like `/clear`.
+- The line never wraps: the outer and detail Boxes are `flexWrap="nowrap"`, the circle, bar, time and button `flexShrink={0}`, and the details Box `minWidth={0}` + `overflow="hidden"`, so a narrow window cuts the details instead of breaking "5 min / left" and dropping the button to a new row.
 - Never copy the mod into `~/.claude/dev-mods/<session>/`: next to the folder in `CLAUDE_CODE_PLUGIN_DIRS` it loads twice. Old copies there broke the line after a restart (2026-10-06).
 
 ## Behaviour agreed with the owner
 
-- Never ping a cold cache. Ping 5 min before expiry (55 min into the 1-hour cache), retry every 30 s on failure, stop after 20 pings in a row unless a stop time was given. Keep-warm only for a cache of 30 min or more.
+- Never ping a cold cache, visible or not. Ping 5 min before expiry (55 min into the 1-hour cache), retry every 30 s on failure, stop after 20 pings in a row unless a stop time was given. Keep-warm only for a cache of 30 min or more.
 - Keep it light: one local check every 15 s, the line redrawn at most once a minute, no model call except the ping.
 - The line: circle `⚫ ◕ ◑ ◔ ○`, 10 blocks `▰ ▱`, "N min left (HH:MM)" in bold, dim details separated by `·`. Green only while keep-warm is on and able to ping; everything else default grey.
 - The cache length is detected (settings, then plan) and corrected by what the cache actually does.
+- After a restart the line must be honest from the start: if the next ping has to be the visible one, it says so ("(shows in chat)") before the ping, not when it fails (owner's ruling 2026-10-06, chosen over waiting for the user's next message).
 
 ## Releasing
 

@@ -103,9 +103,11 @@ Keep-warm is **off by default** and you switch it **per session**: only the sess
 | --- | --- |
 | **◕** and **▰▰▰▰▰▰▰▱▱▱** | How much of the cache's life is left. **Green** while keep-warm is on, grey when it is off, and **○** once the cache has expired. |
 | **40 min left (14:12)** | Time left, and the clock time the cache expires if nothing happens. |
-| **next ping 14:07** | When keep-warm will read the cache next. |
+| **next ping 14:07** | When keep-warm will read the cache next. **(shows in chat)** means this ping is a short visible message, because the session hasn't answered since the app restarted. |
 | **3 pings ✓** | Pings so far, and whether the last one found the cache warm (✓) or cold (✗). |
-| **keep-warm starts after your next message** | Keep-warm is on, but Claude Code has nothing to repeat yet, for example right after `/clear`. The first ping follows your next message. |
+| **conversation nearly full: keep-warm waits for you** | The next ping would have to be the visible one (after a restart), and in a conversation this full it could fail or make Claude Code compact it. So keep-warm waits for your own next message. |
+| **ping failed: …** | The last ping never reached the model, with the reason Claude Code gave. "Prompt is too long" means the conversation is over the model's limit: run `/compact` in that session. The cache then expires normally. |
+| **keep-warm starts after your next message** | Keep-warm is on but doesn't know your cache length yet. That only happens before the first answer after you install the mod. |
 | **773k cached** | The size of your conversation, which is what your next message would re-write if the cache went cold. |
 
 <br>
@@ -122,7 +124,7 @@ flowchart LR
 ```
 
 - **It never wakes a cold cache.** The ping goes out 5 minutes before the cache would expire. If the cache has already expired, keep-warm waits for your next message instead of paying to rebuild it.
-- **Nothing is added to your conversation.** The ping sends your conversation once more, outside the chat, with a one-line question, and throws the answer away.
+- **Nothing is added to your conversation.** The ping sends your conversation once more, outside the chat, with a one-line question, and throws the answer away. One exception: after the app restarts, Claude Code can repeat a conversation only once it has answered again. So in a session you haven't touched since the restart, the first ping is a short message in the chat, which Claude answers with "ok". The line says so in advance: "next ping 14:07 (shows in chat)".
 - **It works while Claude is waiting for you**, for example on a question it asked you or a permission prompt.
 - **It is light.** The line itself never calls the model: one quick local check every 15 seconds, redrawn at most once a minute. The only thing that uses your plan or credits is the ping, about once every 55 minutes, in sessions where keep-warm is on.
 
@@ -189,6 +191,8 @@ A mod runs inside Claude Code with your permissions, so here is everything this 
 Only the **keep-warm ping**, and only while keep-warm is on: about 5 minutes before the cache would expire, so about once every 55 minutes.
 
 The mod asks Claude Code to send this session's last request again, with one line added: `Keep-warm ping. Reply with just "ok".` (the `$.model.fork` call in [`hooks/register.tsx`](hooks/register.tsx)). It goes **to Anthropic, through Claude Code's own connection, on your own account**, like any message you send. That request reads your conversation from the cache, which is what keeps it warm. The answer is thrown away, and nothing is added to your conversation.
+
+After an app restart, Claude Code can repeat a session's request this way only once the session has answered again. Until then the ping is a short message the mod sends into the chat instead (the `$.prompt.submit` call): `Keep-warm ping from the Cache Keep-Warm mod. Reply with exactly "ok" and nothing else. Use no tools.` Claude answers "ok", and from then on the pings are invisible again. Same destination, same account, and the same rule: only in the last minutes before the cache would expire, never once it is cold.
 
 The mod itself never reads what your conversation says: from each request it only takes the usage figures (how many tokens were read from the cache or written to it).
 

@@ -73,6 +73,17 @@ const TTL_VALUE = /^(\d+)\s*(s|m|h)$/
 const DURATION = /^(\d+(?:\.\d+)?)\s*(h|m|min)$/
 const UNTIL = /^until\s+(\d{1,2}):(\d{2})$/
 const WAITS_TEXT = 'keep-warm starts after your next message'
+// After an app restart Claude Code can repeat (fork) a conversation only once it has answered in
+// this run. Until then the ping is a real message instead: it shows in the chat, Claude answers
+// "ok", and from then on the pings are invisible again. Same window, so never on a cold cache.
+const VISIBLE_PING_TEXT = 'Keep-warm ping from the Cache Keep-Warm mod. Reply with exactly "ok" and nothing else. Use no tools.'
+const SHOWS_IN_CHAT = ' (shows in chat)'
+// The visible ping is a real turn: after a restart Claude Code attaches the project's instruction
+// files to it (about 240k tokens in a big project), and a conversation filled past this share of
+// the window could then fail ("Prompt is too long") or be compacted, which a ping must never
+// cause. Above it keep-warm waits for the person's own message instead.
+const VISIBLE_PING_MAX_FILL = 0.75
+const NEARLY_FULL_TEXT = 'conversation nearly full: keep-warm waits for you'
 
 const LAST = { plugin: 'cache-keep-warm', key: 'lastRequestAt' } as const
 const KEEP_WARM = { plugin: 'cache-keep-warm', key: 'keepWarm' } as const
@@ -86,10 +97,14 @@ const SAW_RESPONSE = { plugin: 'cache-keep-warm', key: 'sawResponse' } as const
 const SHORT_AFTER = { plugin: 'cache-keep-warm', key: 'shortAfterMs' } as const
 const WAITS = { plugin: 'cache-keep-warm', key: 'waitsForMessage' } as const
 const RESTORED = { plugin: 'cache-keep-warm', key: 'restored' } as const
+const PING_ERROR = { plugin: 'cache-keep-warm', key: 'pingError' } as const
+const NEARLY_FULL = { plugin: 'cache-keep-warm', key: 'nearlyFull' } as const
 
 // The module's own variables start over on a reload; what must survive one is in $.state.
 // `titleMark` is the user's "Mark the session title" setting; changing it in /config reloads
-// the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY.
+// the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY;
+// `savedTtl` is the length this session's own cache had when the store last saw it.
+// `visiblePingAt`: when a visible ping was submitted, until its request is seen.
 // `isFirstRequest`: the first request after a start says nothing about the cache's length.
 const live: {
   storeKey: string
@@ -97,8 +112,19 @@ const live: {
   shownKey: string
   titleMark: boolean
   planTtl: KeepWarmTtl | undefined
+  savedTtl: KeepWarmTtl | undefined
   isFirstRequest: boolean
-} = { storeKey: '', pingPendingUntil: 0, shownKey: '', titleMark: true, planTtl: undefined, isFirstRequest: true }
+  visiblePingAt: number
+} = {
+  storeKey: '',
+  pingPendingUntil: 0,
+  shownKey: '',
+  titleMark: true,
+  planTtl: undefined,
+  savedTtl: undefined,
+  isFirstRequest: true,
+  visiblePingAt: 0,
+}
 
 function minutes(ms: number) {
   return Math.max(0, Math.floor(ms / 60_000))
@@ -153,9 +179,10 @@ async function detectTtl($: EngineInterface, usage: SessionUsage): Promise<KeepW
   const plan = usage.rateLimits.filter(w => PLAN_WINDOWS.includes(w.kind))
   if (plan.length === 0) {
     // The windows arrive with the first response, so before one an empty list proves nothing:
-    // until then, go by what the plan showed last time, in any session.
+    // until then, go by the length this session's cache had when last saved (what its last
+    // request really got), else by what the plan showed last time in any session.
     const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
-    if (!sawResponse) return live.planTtl ?? null
+    if (!sawResponse) return live.savedTtl ?? live.planTtl ?? null
     return rememberPlan($, { ms: FIVE_MIN_MS, reason: 'api' })
   }
   return rememberPlan(
@@ -192,7 +219,8 @@ async function save($: EngineInterface) {
   const { value: lastRequestAt = 0 } = await $.state.get(LAST)
   const { value: keepWarm = false } = await $.state.get(KEEP_WARM)
   const { value: stopAt = 0 } = await $.state.get(STOP_AT)
-  const saved: KeepWarmSaved = { lastRequestAt, keepWarm, stopAt }
+  const { value: ttl = null } = await $.state.get(TTL)
+  const saved: KeepWarmSaved = { lastRequestAt, keepWarm, stopAt, ttl }
   await $.store.set(live.storeKey, saved)
 }
 
@@ -200,6 +228,7 @@ async function setKeepWarm($: EngineInterface, isOn: boolean, stopAt: number) {
   await $.state.set(KEEP_WARM, isOn)
   await $.state.set(STOP_AT, isOn ? stopAt : 0)
   await $.state.set(PINGS, [])
+  await $.state.set(PING_ERROR, '')
   await save($)
   await syncTitle($)
 }
@@ -233,13 +262,22 @@ async function syncTitle($: EngineInterface) {
 async function ping($: EngineInterface, startedAt: number, lastRequestAt: number) {
   const r = await $.model.fork({ prompt: PING_TEXT })
   if (!r.isAnswered && r.reason === 'nothing-to-fork') {
-    // Claude Code has no request of this conversation to repeat yet (a new session before its
-    // first answer, or right after /clear), and none comes until the next message: say so.
+    // Claude Code has no request of this conversation to repeat yet: send the visible one.
     await $.state.set(WAITS, true)
+    const { value: nearlyFull = false } = await $.state.get(NEARLY_FULL)
+    if (!nearlyFull) await visiblePing($, startedAt)
     return
   }
   if (!r.isAnswered && r.reason === 'api-error') {
-    $.ui.toast(`Keep-warm ping failed (HTTP ${r.status ?? '?'}); retrying in ${PING_RETRY_MS / 1000} s.`)
+    // A busy or failing API may answer on a retry; a request the API refuses (the conversation
+    // over the model's limit, for one) gets the same answer every time, so stop and say so.
+    const status = r.status ?? 0
+    if (status >= 400 && status < 500 && status !== 429) {
+      await $.state.set(PING_ERROR, `HTTP ${status}`)
+      $.ui.toast(`Keep-warm ping failed (HTTP ${status}); the cache will expire normally.`)
+      return
+    }
+    $.ui.toast(`Keep-warm ping failed (HTTP ${status || '?'}); retrying in ${PING_RETRY_MS / 1000} s.`)
     live.pingPendingUntil = startedAt + PING_RETRY_MS
     return
   }
@@ -255,6 +293,17 @@ async function ping($: EngineInterface, startedAt: number, lastRequestAt: number
   await save($)
 }
 
+// The fallback ping: a real prompt, so it shows in the chat with Claude's "ok". Its request reads
+// the conversation from cache like the invisible ping, and the turn.step hook records it.
+async function visiblePing($: EngineInterface, startedAt: number) {
+  live.visiblePingAt = startedAt
+  const r = await $.prompt.submit({ text: VISIBLE_PING_TEXT })
+  if (typeof r.drop === 'string') {
+    live.visiblePingAt = 0
+    $.ui.toast(`Keep-warm ping not sent: ${r.drop}`)
+  }
+}
+
 async function tick($: EngineInterface) {
   const t = await $.clock.now()
   const usage = await $.session.usage()
@@ -267,6 +316,9 @@ async function tick($: EngineInterface) {
   // answer, while the engine has none yet: keep that one until the engine has its own.
   const { value: knownContext = 0 } = await $.state.get(CONTEXT)
   const contextTokens = usage.context.tokens ?? knownContext
+  const nearlyFull = usage.context.window > 0 && contextTokens >= VISIBLE_PING_MAX_FILL * usage.context.window
+  const { value: wasNearlyFull = false } = await $.state.get(NEARLY_FULL)
+  if (nearlyFull !== wasNearlyFull) await $.state.set(NEARLY_FULL, nearlyFull)
   const shownKey = `${Math.floor(t / 60_000)}|${ttl?.ms ?? 0}|${ttl?.reason ?? ''}|${contextTokens}|${last}|${shortAfter}`
   if (shownKey !== live.shownKey) {
     live.shownKey = shownKey
@@ -283,10 +335,6 @@ async function tick($: EngineInterface) {
     $.ui.toast(`Keep-warm stopped at ${clockTime(stopAt)} as asked; the cache will expire normally.`)
     return
   }
-  // Nothing to repeat until the next message: trying again would only get the same answer.
-  const { value: waits = false } = await $.state.get(WAITS)
-  if (waits) return
-
   const idle = t - last
   const isPingWindow =
     ttl !== null &&
@@ -303,7 +351,11 @@ async function tick($: EngineInterface) {
     return
   }
   live.pingPendingUntil = t + PING_PENDING_MS
-  await ping($, t, last)
+  // Invisible once the conversation has answered in this run; before that, the visible ping.
+  const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
+  const { value: waits = false } = await $.state.get(WAITS)
+  if (sawResponse && !waits) await ping($, t, last)
+  else if (!nearlyFull) await visiblePing($, t)
 }
 
 // "3h", "90m", "until 18:00" -> when keep-warm stops; 0 = no stop time; -1 = not understood.
@@ -341,6 +393,7 @@ export const register: Register = (on, options) => {
     if (!restored) {
       const saved = (await $.store.get(live.storeKey)) as KeepWarmSaved | undefined
       if (saved) {
+        if (saved.ttl && typeof saved.ttl.ms === 'number') live.savedTtl = saved.ttl
         const { value: last = 0 } = await $.state.get(LAST)
         if (saved.lastRequestAt > last) await $.state.set(LAST, saved.lastRequestAt)
         await $.state.set(KEEP_WARM, saved.keepWarm)
@@ -368,12 +421,17 @@ export const register: Register = (on, options) => {
 
   // A session reopened (an app relaunch, a resume): Claude Code says how long ago its last
   // answer came and how big the conversation is, so the countdown carries on before the first
-  // message. After /clear the conversation starts over and there is no cache to count down.
+  // message. After /clear or /compact the conversation starts over: no cache to count down yet.
   on('classic.SessionStart', async ($, e, next) => {
     const t = await $.clock.now()
-    if (e.source === 'clear') {
+    if (e.source === 'clear' || e.source === 'compact') {
+      // The conversation starts over (cleared, or replaced by its summary): nothing of it is
+      // cached until the next request writes it.
       await $.state.set(LAST, 0)
       await $.state.set(PINGS, [])
+      await $.state.set(SAW_RESPONSE, false)
+      await $.state.set(CONTEXT, 0)
+      await $.state.set(PING_ERROR, '')
       await $.state.set(NOW, t)
       await save($)
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
@@ -396,19 +454,48 @@ export const register: Register = (on, options) => {
     live.pingPendingUntil = 0
     await $.state.set(LAST, t)
     await $.state.set(NOW, t)
-    await $.state.set(WAITS, false)
     await save($)
     const result = yield* next(e)
+    // A request that never reached the model (an error, the conversation over its limit) did not
+    // touch the cache, so its life still runs from the request before.
+    const u = result?.usage
+    if (!u || u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens === 0) {
+      await $.state.set(LAST, previous)
+      await save($)
+      return result
+    }
+    await $.state.set(WAITS, false)
+    await $.state.set(PING_ERROR, '')
+    if (live.visiblePingAt > 0) {
+      const { cache_read_input_tokens: read, cache_creation_input_tokens: written } = u
+      const done: KeepWarmPing = { at: live.visiblePingAt, isHit: read > 0 && read >= HIT_SHARE * (read + written), read }
+      const { value: pings = [] } = await $.state.get(PINGS)
+      await $.state.set(PINGS, [...pings, done].slice(-MAX_PINGS))
+      live.visiblePingAt = 0
+    }
     // Not the first request after a start: a restart can change the prompt itself (a new
     // Claude Code version), which re-writes the cache whatever the gap, so it proves nothing.
     const isFirst = live.isFirstRequest
     live.isFirstRequest = false
-    if (result?.usage && previous > 0 && !isFirst) await observe($, t - previous, result.usage)
+    if (previous > 0 && !isFirst) await observe($, t - previous, u)
     return result
   })
 
+  // A turn with real requests behind it: the conversation has answered in this run (so the next
+  // ping can be invisible, and an empty plan list now means an API key). A turn that died on an
+  // error has no usage; if it was the visible ping, the line says why it failed.
   on('turn.complete', async ($, e, next) => {
-    if (!e.agentId) await $.state.set(SAW_RESPONSE, true)
+    if (!e.agentId) {
+      if (e.usage) await $.state.set(SAW_RESPONSE, true)
+      else if (live.visiblePingAt > 0) {
+        live.visiblePingAt = 0
+        if (e.reason === 'error') {
+          const why = e.answer.trim() || 'an API error'
+          await $.state.set(PING_ERROR, why)
+          $.ui.toast(`Keep-warm ping failed: ${why}. The cache will expire normally.`)
+        }
+      }
+    }
     return next(e)
   })
 
@@ -439,12 +526,13 @@ export const register: Register = (on, options) => {
     const { value: ttl = null } = await $.state.get(TTL)
     const { value: pings = [] } = await $.state.get(PINGS)
     const { value: waits = false } = await $.state.get(WAITS)
+    const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
     const lines = [
       isOn
         ? `Keep-warm on${stopAt ? ` until ${clockTime(stopAt)}` : ` (stops itself after ${MAX_PINGS} pings)`}: about ${minutes(PING_LEAD_MS)} min before the cache would expire, it re-reads the conversation from cache in the background. A cold cache is never pinged.`
         : 'Keep-warm off: the cache expires normally.',
     ]
-    if (isOn && waits) lines.push('Claude Code has no request of this conversation to repeat yet, so keep-warm starts after your next message.')
+    if (isOn && (waits || !sawResponse)) lines.push('Claude Code can repeat this conversation invisibly only once it has answered since the app started, so the next ping is a short message in the chat.')
     if (ttl) lines.push(`This session's cache lasts ${cacheLength(ttl.ms)} (${ttl.reason === 'observed' ? 'seen expiring sooner than expected' : ttl.reason}).`)
     if (ttl && ttl.ms < KEEP_WARM_MIN_TTL_MS) lines.push(`Keep-warm only pings a cache of ${minutes(KEEP_WARM_MIN_TTL_MS)} min or longer.`)
     for (const p of pings.slice(-HISTORY_SHOWN)) {
@@ -467,12 +555,17 @@ export const register: Register = (on, options) => {
     const { value: isWaiting = false } = await $.state.get(WAITING)
     const { value: shortAfter = 0 } = await $.state.get(SHORT_AFTER)
     const { value: waits = false } = await $.state.get(WAITS)
+    const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
+    const { value: pingError = '' } = await $.state.get(PING_ERROR)
+    const { value: nearlyFull = false } = await $.state.get(NEARLY_FULL)
+    // The next ping has to be the visible one but the conversation is too full for it.
+    const isBlocked = (!sawResponse || waits) && nearlyFull
 
     const t = Math.max(now, last)
     const ttlMs = ttl?.ms ?? HOUR_MS
     const canKeepWarm = ttl !== null && ttl.ms >= KEEP_WARM_MIN_TTL_MS
     // Green only while keep-warm is on and able to ping; everything else stays default grey.
-    const isGreen = isOn && canKeepWarm && !waits
+    const isGreen = isOn && canKeepWarm && !pingError && !isBlocked
     const expiresAt = last + ttlMs
     const remaining = expiresAt - t
     const isWarm = last > 0 && remaining > 0
@@ -497,9 +590,12 @@ export const register: Register = (on, options) => {
     } else if (isOn) {
       const lastPing = pings[pings.length - 1]
       if (stopAt) parts.push(`keep-warm stops ${clockTime(stopAt)}`)
-      // No ping can go out yet: Claude Code has nothing to repeat, or the cache length is unknown.
-      if (waits || !ttl) parts.push(WAITS_TEXT)
-      else if (isWarm) parts.push(`next ping ${clockTime(last + ttlMs - PING_LEAD_MS)}`)
+      // With the cache length unknown no ping can go out; before the conversation has answered in
+      // this run the next one is the visible ping.
+      if (pingError) parts.push(`ping failed: ${pingError}`)
+      else if (!ttl) parts.push(WAITS_TEXT)
+      else if (isBlocked) parts.push(NEARLY_FULL_TEXT)
+      else if (isWarm) parts.push(`next ping ${clockTime(last + ttlMs - PING_LEAD_MS)}${sawResponse && !waits ? '' : SHOWS_IN_CHAT}`)
       if (lastPing) parts.push(`${pings.length} ping${pings.length === 1 ? '' : 's'} ${lastPing.isHit ? '✓' : '✗'}`)
     }
 
@@ -513,27 +609,35 @@ export const register: Register = (on, options) => {
     const canToggle = isOn || !ttl || canKeepWarm || ttl.reason === 'overage' || ttl.reason === 'observed'
 
     // Each detail is its own element and the spacing comes from the layout (column gaps), which
-    // no surface squeezes the way it squeezes runs of spaces inside one text.
+    // no surface squeezes the way it squeezes runs of spaces inside one text. In a narrow window
+    // nothing wraps: the time and the button keep their size and the details are cut at the edge.
     return (
-      <Box alignItems="center">
-        <Box flexGrow={1} alignItems="center" columnGap={DETAIL_GAP}>
-          {isGreen ? <Text color="green" bold>{circle}</Text> : <Text dimColor>{circle}</Text>}
-          <Box>
+      <Box alignItems="center" flexWrap="nowrap">
+        <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden" flexWrap="nowrap" alignItems="center" columnGap={DETAIL_GAP}>
+          <Box flexShrink={0}>
+            {isGreen ? <Text color="green" bold>{circle}</Text> : <Text dimColor>{circle}</Text>}
+          </Box>
+          <Box flexShrink={0}>
             {isGreen ? <Text color="green">{BAR_FULL.repeat(filled)}</Text> : <Text dimColor>{BAR_FULL.repeat(filled)}</Text>}
             <Text dimColor>{BAR_EMPTY.repeat(BAR_CELLS - filled)}</Text>
           </Box>
-          <Box>
+          <Box flexShrink={0}>
             <Text bold>{main}</Text>
             <Text dimColor>{expiresText}</Text>
           </Box>
-          {parts.flatMap(p => [<Text dimColor>·</Text>, <Text dimColor>{p}</Text>])}
+          {parts.flatMap(p => [
+            <Box flexShrink={0}><Text dimColor>·</Text></Box>,
+            <Box flexShrink={0}><Text dimColor>{p}</Text></Box>,
+          ])}
         </Box>
         {canToggle && (
-          <Button
-            key="toggle"
-            label={isOn ? 'Stop' : 'Keep warm'}
-            onPress={() => setKeepWarm($, !isOn, 0)}
-          />
+          <Box flexShrink={0}>
+            <Button
+              key="toggle"
+              label={isOn ? 'Stop' : 'Keep warm'}
+              onPress={() => setKeepWarm($, !isOn, 0)}
+            />
+          </Box>
         )}
       </Box>
     )
