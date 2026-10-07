@@ -227,6 +227,7 @@ Per session, in Claude Code's plugin storage on your computer: the time of the l
 | --- | --- |
 | Session start | Adds the `/keepwarm` command and starts its 15-second local check |
 | A session is reopened or cleared (Claude Code's `SessionStart` hook) | Reads how long ago the last answer came and the conversation's size, so the countdown carries on; after `/clear`, starts the countdown over. Changes nothing. |
+| A compaction (`/compact` or automatic) | Checks only whose it is and whether it went through: when your conversation itself was compacted, starts the countdown over. Ignores a subagent's compaction of its own work and a summary prepared ahead of time. Never reads or changes the summary or your messages. |
 | Each request of the main conversation | Notes the time and how much was read from the cache. Changes nothing. Subagents' requests are ignored. |
 | A turn ends | Notes that an answer arrived (which helps tell a subscription from an API key) |
 | Claude's `AskUserQuestion` tool | Shows "waiting for your answer" while the question is open. Never changes the question or your answer. |

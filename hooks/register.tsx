@@ -240,6 +240,20 @@ async function setKeepWarm($: EngineInterface, isOn: boolean, stopAt: number) {
   await syncTitle($)
 }
 
+// The conversation starts over (cleared, or replaced by its summary): nothing of it is cached
+// until the next request writes it.
+async function startOver($: EngineInterface) {
+  await $.state.set(LAST, 0)
+  await $.state.set(PINGS, [])
+  await $.state.set(SAW_RESPONSE, false)
+  await $.state.set(CONTEXT, 0)
+  await $.state.set(PING_ERROR, '')
+  await $.state.set(NOW, await $.clock.now())
+  live.roomChecked = false
+  const { value: restored = false } = await $.state.get(RESTORED)
+  if (restored) await save($)
+}
+
 // Puts the mark on this session's title in the app's list while keep-warm is on, and takes it
 // off otherwise (or always, with the setting off). Runs on every switch, at start (which also
 // clears a mark a crash left behind) and every few minutes (a title the app regenerated loses
@@ -461,25 +475,13 @@ export const register: Register = (on, options) => {
 
   // A session reopened (an app relaunch, a resume): Claude Code says how long ago its last
   // answer came and how big the conversation is, so the countdown carries on before the first
-  // message. After /clear or /compact the conversation starts over: no cache to count down yet.
+  // message. After /clear the conversation starts over: no cache to count down yet. Its
+  // 'compact' is not used: it also comes when a subagent compacts its own conversation, with
+  // nothing saying so (no agent_id), which reset the main countdown. session.compact says whose.
   on('classic.SessionStart', async ($, e, next) => {
-    // A subagent's own start, resume or compaction is about its conversation, not this one: a
-    // background agent compacting at its limit reset the main countdown and stopped keep-warm.
-    if (e.agent_id) return next(e)
-    const t = await $.clock.now()
-    if (e.source === 'clear' || e.source === 'compact') {
-      // The conversation starts over (cleared, or replaced by its summary): nothing of it is
-      // cached until the next request writes it.
-      await $.state.set(LAST, 0)
-      await $.state.set(PINGS, [])
-      await $.state.set(SAW_RESPONSE, false)
-      await $.state.set(CONTEXT, 0)
-      await $.state.set(PING_ERROR, '')
-      await $.state.set(NOW, t)
-      live.roomChecked = false
-      const { value: restored = false } = await $.state.get(RESTORED)
-      if (restored) await save($)
-    } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
+    if (e.source === 'clear') await startOver($)
+    else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
+      const t = await $.clock.now()
       const lastAt = t - e.seconds_since_last_response * 1000 - RESUME_MARGIN_MS
       const { value: last = 0 } = await $.state.get(LAST)
       if (lastAt > last) await $.state.set(LAST, lastAt)
@@ -491,6 +493,22 @@ export const register: Register = (on, options) => {
       if (restored) await save($)
     }
     return next(e)
+  })
+
+  // A compaction of the main conversation (/compact, the threshold, a plugin) replaces it with its
+  // summary, so the countdown starts over. A subagent's own (agentId) is not this cache, a
+  // precomputed one is not applied yet, and a skipped one changed nothing. Read only: the
+  // compaction passes on unchanged.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId && e.trigger !== 'precompute' && result.skip === undefined) {
+      try {
+        await startOver($)
+      } catch {
+        // Never fail a compaction over the countdown.
+      }
+    }
+    return result
   })
 
   // Each model request of the main conversation (not a subagent's: its cache is its own):
