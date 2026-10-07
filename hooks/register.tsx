@@ -463,6 +463,9 @@ export const register: Register = (on, options) => {
   // answer came and how big the conversation is, so the countdown carries on before the first
   // message. After /clear or /compact the conversation starts over: no cache to count down yet.
   on('classic.SessionStart', async ($, e, next) => {
+    // A subagent's own start, resume or compaction is about its conversation, not this one: a
+    // background agent compacting at its limit reset the main countdown and stopped keep-warm.
+    if (e.agent_id) return next(e)
     const t = await $.clock.now()
     if (e.source === 'clear' || e.source === 'compact') {
       // The conversation starts over (cleared, or replaced by its summary): nothing of it is
