@@ -109,6 +109,7 @@ const NEARLY_FULL = { plugin: 'cache-keep-warm', key: 'nearlyFull' } as const
 // the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY;
 // `savedTtl` is the length this session's own cache had when the store last saw it.
 // `visiblePingAt`: when a visible ping was submitted, until its request is seen.
+// `pingTurnId`: the visible ping's turn, which is no sign of use when it ends.
 // `roomChecked`: whether this process has worked out if the visible ping fits.
 // `isFirstRequest`: the first request after a start says nothing about the cache's length.
 const live: {
@@ -120,6 +121,7 @@ const live: {
   savedTtl: KeepWarmTtl | undefined
   isFirstRequest: boolean
   visiblePingAt: number
+  pingTurnId: string
   roomChecked: boolean
 } = {
   storeKey: '',
@@ -130,6 +132,7 @@ const live: {
   savedTtl: undefined,
   isFirstRequest: true,
   visiblePingAt: 0,
+  pingTurnId: '',
   roomChecked: false,
 }
 
@@ -399,7 +402,7 @@ async function tick($: EngineInterface) {
   const { value: pings = [] } = await $.state.get(PINGS)
   if (stopAt === 0 && pings.length >= MAX_PINGS) {
     await setKeepWarm($, false, 0)
-    $.ui.toast(`Keep-warm stopped itself after ${MAX_PINGS} pings; the cache will expire.`)
+    $.ui.toast(`Keep-warm stopped itself after ${MAX_PINGS} pings in a row; the cache will expire.`)
     return
   }
   live.pingPendingUntil = t + PING_PENDING_MS
@@ -538,6 +541,7 @@ export const register: Register = (on, options) => {
       const { value: pings = [] } = await $.state.get(PINGS)
       await $.state.set(PINGS, [...pings, done].slice(-MAX_PINGS))
       live.visiblePingAt = 0
+      live.pingTurnId = e.turnId
     }
     // Not the first request after a start: a restart can change the prompt itself (a new
     // Claude Code version), which re-writes the cache whatever the gap, so it proves nothing.
@@ -548,12 +552,18 @@ export const register: Register = (on, options) => {
   })
 
   // A turn with real requests behind it: the conversation has answered in this run (so the next
-  // ping can be invisible, and an empty plan list now means an API key). A turn that died on an
-  // error has no usage; if it was the visible ping, the line says why it failed.
+  // ping can be invisible, and an empty plan list now means an API key), and unless it was the
+  // mod's own visible ping, the conversation is in use, yours or a turn it ran by itself (an
+  // agent's report, another session's message): the pings in a row start over. A turn that died
+  // on an error has no usage; if it was the visible ping, the line says why it failed.
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId) {
-      if (e.usage) await $.state.set(SAW_RESPONSE, true)
-      else if (live.visiblePingAt > 0) {
+      const isPingTurn = e.turnId === live.pingTurnId
+      if (isPingTurn) live.pingTurnId = ''
+      if (e.usage) {
+        await $.state.set(SAW_RESPONSE, true)
+        if (!isPingTurn) await $.state.set(PINGS, [])
+      } else if (live.visiblePingAt > 0) {
         live.visiblePingAt = 0
         if (e.reason === 'error') {
           const why = e.answer.trim() || 'an API error'
@@ -595,7 +605,7 @@ export const register: Register = (on, options) => {
     const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
     const lines = [
       isOn
-        ? `Keep-warm on${stopAt ? ` until ${clockTime(stopAt)}` : ` (stops itself after ${MAX_PINGS} pings)`}: about ${minutes(PING_LEAD_MS)} min before the cache would expire, it re-reads the conversation from cache in the background. A cold cache is never pinged.`
+        ? `Keep-warm on${stopAt ? ` until ${clockTime(stopAt)}` : ` (stops itself after ${MAX_PINGS} pings in a row)`}: about ${minutes(PING_LEAD_MS)} min before the cache would expire, it re-reads the conversation from cache in the background. A cold cache is never pinged.`
         : 'Keep-warm off: the cache expires normally.',
     ]
     if (isOn && (waits || !sawResponse)) lines.push('Claude Code can repeat this conversation invisibly only once it has answered since the app started, so the next ping is a short message in the chat.')
