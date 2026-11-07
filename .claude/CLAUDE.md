@@ -42,7 +42,7 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 
 ## Behaviour agreed with the owner
 
-- Never ping a cold cache, visible or not. Ping 5 min before expiry (55 min into the 1-hour cache), retry every 30 s on failure, stop after 20 pings in a row unless a stop time was given. Keep-warm only for a cache of 30 min or more.
+- Never ping a cold cache, visible or not. Ping 8 min before expiry (52 min into the 1-hour cache, since 1.0.9: Claude Code's idle compaction compacts a conversation of 200k+ tokens, or `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`, at 90% of the hour = 54 min unless `"idleCompaction": false`; it skips only after a newer main-thread request, so whether the fork ping stops it is unverified), retry every 30 s on failure, stop after 20 pings in a row unless a stop time was given. Keep-warm only for a cache of 30 min or more.
 - "In a row" means no real turn in between: any main-conversation turn with usage, the user's or one the session runs by itself (an agent's report, another session's message), starts the count over; the mod's own pings never do (owner's ruling 2026-10-08). The visible ping's turn is known by the `turnId` its `turn.step` carried (`turn.complete` has the same one); the invisible ping is no turn at all. Before 1.0.8 only switching keep-warm, `/clear` or a compaction restarted the count, so a session in daily use stopped after 20 pings in total.
 - Keep it light: one local check every 15 s, the line redrawn at most once a minute, no model call except the ping.
 - The line: circle `⚫ ◕ ◑ ◔ ○`, 10 blocks `▰ ▱`, "N min left (HH:MM)" in bold, dim details separated by `·`. Green only while keep-warm is on and able to ping; everything else default grey.

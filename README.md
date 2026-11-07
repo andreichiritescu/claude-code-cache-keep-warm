@@ -95,7 +95,7 @@ Click **Keep warm** on the line, or type a command:
 | `/keepwarm off` | Stop (or click **Stop**) |
 | `/keepwarm` | Show the state and the last pings |
 
-Keep-warm is **off by default** and you switch it **per session**: only the sessions you want are kept warm. It stops by itself after about 18 hours (20 pings in a row) unless you gave it a time, because past that point one re-write is cheaper than more pings.
+Keep-warm is **off by default** and you switch it **per session**: only the sessions you want are kept warm. It stops by itself after about 17 hours (20 pings in a row) unless you gave it a time, because past that point one re-write is cheaper than more pings.
 
 ### Reading the line
 
@@ -117,17 +117,17 @@ Keep-warm is **off by default** and you switch it **per session**: only the sess
 
 ```mermaid
 flowchart LR
-    A["You stop typing"] --> B{"55 minutes later:<br/>still away?"}
+    A["You stop typing"] --> B{"52 minutes later:<br/>still away?"}
     B -- yes --> C["Keep-warm reads the<br/>conversation from the cache"]
     C --> D["The cache is good<br/>for another hour"]
     D --> B
     B -- "you are back" --> E["Your next message<br/>reads from the cache:<br/>cheap"]
 ```
 
-- **It never wakes a cold cache.** The ping goes out 5 minutes before the cache would expire. If the cache has already expired, keep-warm waits for your next message instead of paying to rebuild it.
+- **It never wakes a cold cache.** The ping goes out 8 minutes before the cache would expire. If the cache has already expired, keep-warm waits for your next message instead of paying to rebuild it.
 - **Nothing is added to your conversation.** The ping sends your conversation once more, outside the chat, with a one-line question, and throws the answer away. One exception: after the app restarts, Claude Code can repeat a conversation only once it has answered again. So in a session you haven't touched since the restart, the first ping is a short message in the chat, which Claude answers with "ok". The line says so in advance: "next ping 14:07 (shows in chat)".
 - **It works while Claude is waiting for you**, for example on a question it asked you or a permission prompt.
-- **It is light.** The line itself never calls the model: one quick local check every 15 seconds, redrawn at most once a minute. The only thing that uses your plan or credits is the ping, about once every 55 minutes, in sessions where keep-warm is on.
+- **It is light.** The line itself never calls the model: one quick local check every 15 seconds, redrawn at most once a minute. The only thing that uses your plan or credits is the ping, about once every 52 minutes, in sessions where keep-warm is on.
 
 <details>
 <summary><b>How it knows how long your cache lasts</b></summary>
@@ -168,7 +168,7 @@ In the desktop app, renaming a title **you typed yourself** asks for your approv
 Your cache lasts five minutes by default, so keep-warm does not ping. If you take longer breaks, set `promptCacheTtl` to `"1h"` in your Claude Code settings: the cache then lasts an hour and keep-warm works. One-hour cache writes cost more than five-minute ones, so this pays off only if you do take breaks.
 
 **Will it ping forever if I forget it?**
-No. It stops by itself after 20 pings in a row (about 18 hours), or at the time you gave it with `/keepwarm 3h` or `/keepwarm until 18:00`.
+No. It stops by itself after 20 pings in a row (about 17 hours), or at the time you gave it with `/keepwarm 3h` or `/keepwarm until 18:00`.
 
 **Does it work in VS Code?**
 The keep-warm pings work there, but the line is only drawn in the terminal and in the desktop app's Code tab.
@@ -189,7 +189,7 @@ A mod runs inside Claude Code with your permissions, so here is everything this 
 
 ### What leaves your computer
 
-Only the **keep-warm ping**, and only while keep-warm is on: about 5 minutes before the cache would expire, so about once every 55 minutes.
+Only the **keep-warm ping**, and only while keep-warm is on: about 8 minutes before the cache would expire, so about once every 52 minutes.
 
 The mod asks Claude Code to send this session's last request again, with one line added: `Keep-warm ping. Reply with just "ok".` (the `$.model.fork` call in [`hooks/register.tsx`](hooks/register.tsx)). It goes **to Anthropic, through Claude Code's own connection, on your own account**, like any message you send. That request reads your conversation from the cache, which is what keeps it warm. The answer is thrown away, and nothing is added to your conversation.
 

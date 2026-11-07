@@ -9,12 +9,13 @@ const KNOWN_TTLS_MS = [FIVE_MIN_MS, HOUR_MS]
 // Keep-warm only for a cache this long or longer: on a short cache, pinging every few
 // minutes costs more than the single re-write it saves after any real break.
 const KEEP_WARM_MIN_TTL_MS = 30 * 60_000
-// A ping goes out this long before the cache would expire (55 min into a 1-hour cache), and
-// never in its last minute: a cold cache is never pinged. A later ping means fewer of them
-// (one per ~55 min instead of one per 45), and the lead still leaves four minutes of retries
-// if the API is busy. The cache's life runs from when a request reaches the server, a moment
-// after the time recorded here, so the real deadline is slightly later than computed.
-const PING_LEAD_MS = 5 * 60_000
+// A ping goes out this long before the cache would expire (52 min into a 1-hour cache), and
+// never in its last minute: a cold cache is never pinged. 52 min comes before Claude Code's
+// idle compaction, which compacts a long idle conversation at 90% of the hour (54 min); a later
+// ping would mean fewer of them, and the lead leaves minutes of retries if the API is busy.
+// The cache's life runs from when a request reaches the server, a moment after the time
+// recorded here, so the real deadline is slightly later than computed.
+const PING_LEAD_MS = 8 * 60_000
 const PING_MARGIN_MS = 60_000
 // After a failed ping, wait this long before trying again inside the window.
 const PING_RETRY_MS = 30_000
