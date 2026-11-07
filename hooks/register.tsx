@@ -182,8 +182,8 @@ async function detectTtl($: EngineInterface, usage: SessionUsage): Promise<KeepW
   if ((await $.env.get('FORCE_PROMPT_CACHING_5M')) === '1') return { ms: FIVE_MIN_MS, reason: 'setting' }
   const fromEnv = parseTtl(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
   if (fromEnv) return { ms: fromEnv, reason: 'setting' }
-  const settings = await $.settings.read()
-  const fromSettings = parseTtl(settings['promptCacheTtl'])
+  // Only this one setting: asked by its key, Claude Code hands over its value and nothing else.
+  const fromSettings = parseTtl(await $.settings.read({ key: 'promptCacheTtl' }))
   if (fromSettings) return { ms: fromSettings, reason: 'setting' }
   if ((await $.env.get('ENABLE_PROMPT_CACHING_1H')) === '1') return { ms: HOUR_MS, reason: 'setting' }
 

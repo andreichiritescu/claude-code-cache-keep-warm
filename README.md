@@ -210,7 +210,7 @@ With the setting **Mark the session title** off, the mod never adds the mark; it
 
 ### What it reads
 
-- **Your Claude Code settings**, for `promptCacheTtl` only, and three environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, to know how long your cache lasts. Claude Code hands a mod the settings as one object: this mod looks at `promptCacheTtl` and nothing else, and keeps or sends no other setting, credential or API key.
+- **Your Claude Code settings**, for `promptCacheTtl` only, and three environment variables: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, to know how long your cache lasts. The mod asks Claude Code for that one setting by name, so it never receives your other settings, credentials or API keys.
 - **This session's figures** from Claude Code: the conversation's size, the cache tokens of each request, and whether your plan's usage limits are reported (which tells a subscription from an API key). After a restart, while the next ping would be the visible one, also the free space left in the context window and the size of the instruction files (their token counts only, never their text), to check the visible ping fits.
 - **When you reopen a session**, what Claude Code tells mods at that moment: how long ago the session's last answer came and how big the conversation is. That lets the countdown carry on before your first message.
 - **The clock.**

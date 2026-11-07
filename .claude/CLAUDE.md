@@ -21,6 +21,7 @@ These notes live in `.claude/` on purpose: a `CLAUDE.md` at the plugin root make
 
 - `claude plugin validate` rejects passing `$` to the `atom` / `read` / `update` helpers from `'claude-code'`, even the shipped examples: use `$.state.get` / `$.state.set` with literal `{ plugin, key } as const` refs.
 - `$` may only be passed into functions declared in this file; `$.env.get` takes string literals.
+- Read a setting by its key, `$.settings.read({ key: 'promptCacheTtl' })`, which resolves to that value alone: `$.settings.read()` hands over every setting, `env` and credentials included, and the directory flags it as "uses a credential" (since 1.0.10).
 - The desktop app collapses runs of spaces inside one `Text`, non-breaking spaces included: space details with separate elements and a `Box` `columnGap`.
 - In the desktop font the plain `●` is smaller than `◔ ◑ ◕`: the full circle is `⚫` + U+FE0E (text style); `○` for cold.
 - A `Button` without `plain` gets the app's normal button look.
