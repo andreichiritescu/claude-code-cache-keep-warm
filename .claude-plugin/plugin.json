@@ -1,7 +1,7 @@
 {
   "name": "cache-keep-warm",
   "displayName": "Cache Keep-Warm",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Shows how long your session's prompt cache stays warm, and can keep it warm in the background while you are away",
   "author": {
     "name": "AndreiC81",
@@ -23,6 +23,12 @@
       "title": "Mark the session title",
       "description": "While keep-warm is on, put a green dot in front of the session's title in the desktop app's session list",
       "default": true
+    },
+    "default_on": {
+      "type": "boolean",
+      "title": "On in new sessions",
+      "description": "Turn keep-warm on in every new session, as if you ran /keepwarm on. Each session still stops by itself after 20 pings in a row",
+      "default": false
     }
   }
 }

@@ -95,7 +95,7 @@ Click **Keep warm** on the line, or type a command:
 | `/keepwarm off` | Stop (or click **Stop**) |
 | `/keepwarm` | Show the state and the last pings |
 
-Keep-warm is **off by default** and you switch it **per session**: only the sessions you want are kept warm. It stops by itself after about 17 hours (20 pings in a row) unless you gave it a time, because past that point one re-write is cheaper than more pings.
+Keep-warm is **off by default** and you switch it **per session**: only the sessions you want are kept warm. To have it on in every new session, turn on the **On in new sessions** setting. It stops by itself after about 17 hours (20 pings in a row) unless you gave it a time, because past that point one re-write is cheaper than more pings.
 
 ### Reading the line
 
@@ -152,8 +152,9 @@ Keep-warm only pings a cache that lasts **30 minutes or more**: on the five-minu
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Mark the session title | On | While keep-warm is on, put 🟢 in front of the session's title in the desktop app's session list |
+| On in new sessions | Off | Turn keep-warm on in every new session, as if you ran `/keepwarm on`. A session you switched off stays off |
 
-Change it in `/config`, or with `/plugin configure cache-keep-warm@cache-keep-warm`.
+Change them in `/config`, or with `/plugin configure cache-keep-warm@cache-keep-warm`.
 
 In the desktop app, renaming a title **you typed yourself** asks for your approval each time; titles the app generated change without asking.
 
