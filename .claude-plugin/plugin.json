@@ -23,6 +23,12 @@
       "title": "Mark the session title",
       "description": "While keep-warm is on, put a green dot in front of the session's title in the desktop app's session list",
       "default": true
+    },
+    "default_on": {
+      "type": "boolean",
+      "title": "On in new sessions",
+      "description": "Turn keep-warm on in every new session, as if you ran /keepwarm on. Each session still stops by itself after 20 pings in a row",
+      "default": false
     }
   }
 }

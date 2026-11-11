@@ -54,6 +54,8 @@ const CIRCLE_COLD = '○'
 const TITLE_MARK = '🟢 '
 // The userConfig key in plugin.json that switches the title mark off.
 const TITLE_MARK_OPTION = 'title_mark'
+// The userConfig key in plugin.json that turns keep-warm on in every new session.
+const DEFAULT_ON_OPTION = 'default_on'
 const TITLE_SYNC_MS = 5 * 60_000
 const GET_SESSION_TOOL = 'mcp__ccd_session_mgmt__get_session'
 const SET_TITLE_TOOL = 'mcp__ccd_session_mgmt__set_session_title'
@@ -122,6 +124,7 @@ const live: {
   pingPendingUntil: number
   shownKey: string
   titleMark: boolean
+  defaultOn: boolean
   planTtl: KeepWarmTtl | undefined
   savedTtl: KeepWarmTtl | undefined
   isFirstRequest: boolean
@@ -134,6 +137,7 @@ const live: {
   pingPendingUntil: 0,
   shownKey: '',
   titleMark: true,
+  defaultOn: false,
   planTtl: undefined,
   savedTtl: undefined,
   isFirstRequest: true,
@@ -436,6 +440,7 @@ function parseStop(text: string, now: number) {
 
 export const register: Register = (on, options) => {
   live.titleMark = options[TITLE_MARK_OPTION] !== false
+  live.defaultOn = options[DEFAULT_ON_OPTION] === true
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -462,6 +467,11 @@ export const register: Register = (on, options) => {
         if (saved.lastRequestAt > last) await $.state.set(LAST, saved.lastRequestAt)
         await $.state.set(KEEP_WARM, saved.keepWarm)
         await $.state.set(STOP_AT, saved.stopAt ?? 0)
+      } else if (live.defaultOn) {
+        // A session the store has never seen: the "On in new sessions" setting switches it on.
+        // A saved session keeps its own switch, so /keepwarm off holds across a relaunch.
+        await $.state.set(KEEP_WARM, true)
+        await $.state.set(STOP_AT, 0)
       }
       await $.state.set(RESTORED, true)
       await save($)
