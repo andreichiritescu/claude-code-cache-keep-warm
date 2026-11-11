@@ -152,7 +152,7 @@ Keep-warm only pings a cache that lasts **30 minutes or more**: on the five-minu
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Mark the session title | On | While keep-warm is on, put 🟢 in front of the session's title in the desktop app's session list |
-| On in new sessions | Off | Turn keep-warm on in every new session, as if you ran `/keepwarm on`. A session you switched off stays off |
+| On in new sessions | Off | Turn keep-warm on in every new session, as if you ran `/keepwarm on`. A session you reopen keeps its own switch, so one you switched off stays off |
 
 Change them in `/config`, or with `/plugin configure cache-keep-warm@cache-keep-warm`.
 

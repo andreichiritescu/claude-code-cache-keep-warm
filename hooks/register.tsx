@@ -112,7 +112,9 @@ const NEARLY_FULL = { plugin: 'cache-keep-warm', key: 'nearlyFull' } as const
 
 // The module's own variables start over on a reload; what must survive one is in $.state.
 // `titleMark` is the user's "Mark the session title" setting; changing it in /config reloads
-// the module, so it is read once in register(). `planTtl` mirrors the shared PLAN_TTL_KEY;
+// the module, so it is read once in register(), like `defaultOn` ("On in new sessions").
+// `isUnseen`: the store had nothing for this session at start; `startedNew`: Claude Code started
+// it as a new session (not reopened). `planTtl` mirrors the shared PLAN_TTL_KEY;
 // `savedTtl` is the length this session's own cache had when the store last saw it.
 // `visiblePingAt`: when a visible ping was submitted, until its request is seen.
 // `pingTurnId`: the visible ping's turn, which is no sign of use when it ends.
@@ -125,6 +127,8 @@ const live: {
   shownKey: string
   titleMark: boolean
   defaultOn: boolean
+  isUnseen: boolean
+  startedNew: boolean
   planTtl: KeepWarmTtl | undefined
   savedTtl: KeepWarmTtl | undefined
   isFirstRequest: boolean
@@ -138,6 +142,8 @@ const live: {
   shownKey: '',
   titleMark: true,
   defaultOn: false,
+  isUnseen: false,
+  startedNew: false,
   planTtl: undefined,
   savedTtl: undefined,
   isFirstRequest: true,
@@ -256,6 +262,15 @@ async function setKeepWarm($: EngineInterface, isOn: boolean, stopAt: number) {
   await $.state.set(PING_ERROR, '')
   await save($)
   await syncTitle($)
+}
+
+// The "On in new sessions" setting: keep-warm on for a session Claude Code started new and the
+// store has never seen. A reopened session keeps its own switch, even once the store has forgotten
+// it after a week. Needs both the start event and the restore, which come in either order.
+async function switchOnIfNew($: EngineInterface) {
+  if (!live.defaultOn || !live.isUnseen || !live.startedNew) return
+  live.isUnseen = false
+  await setKeepWarm($, true, 0)
 }
 
 // The conversation starts over (cleared, or replaced by its summary): nothing of it is cached
@@ -467,14 +482,10 @@ export const register: Register = (on, options) => {
         if (saved.lastRequestAt > last) await $.state.set(LAST, saved.lastRequestAt)
         await $.state.set(KEEP_WARM, saved.keepWarm)
         await $.state.set(STOP_AT, saved.stopAt ?? 0)
-      } else if (live.defaultOn) {
-        // A session the store has never seen: the "On in new sessions" setting switches it on.
-        // A saved session keeps its own switch, so /keepwarm off holds across a relaunch.
-        await $.state.set(KEEP_WARM, true)
-        await $.state.set(STOP_AT, 0)
-      }
+      } else live.isUnseen = true
       await $.state.set(RESTORED, true)
       await save($)
+      await switchOnIfNew($)
     }
 
     // Forget sessions untouched for a week so the store stays small. Aged by the last save: a
@@ -503,7 +514,10 @@ export const register: Register = (on, options) => {
   // 'compact' is not used: it also comes when a subagent compacts its own conversation, with
   // nothing saying so (no agent_id), which reset the main countdown. session.compact says whose.
   on('classic.SessionStart', async ($, e, next) => {
-    if (e.source === 'clear') await startOver($)
+    if (e.source === 'startup') {
+      live.startedNew = true
+      await switchOnIfNew($)
+    } else if (e.source === 'clear') await startOver($)
     else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
       const t = await $.clock.now()
       const lastAt = t - e.seconds_since_last_response * 1000 - RESUME_MARGIN_MS
