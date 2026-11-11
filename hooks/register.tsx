@@ -70,6 +70,9 @@ const PLAN_TTL_KEY = 'plan-ttl'
 // Rate-limit windows that only a Claude subscription reports; an API key or a cloud provider reports none.
 const PLAN_WINDOWS = ['five_hour', 'seven_day']
 const PLAN_LIMIT_PERCENT = 100
+// The windows can come a moment after an answer: with a plan seen before, only this many answers
+// in a row without them mean an API key (one empty look labelled a subscription "API key").
+const API_AFTER_ANSWERS = 3
 const TTL_VALUE = /^(\d+)\s*(s|m|h)$/
 const DURATION = /^(\d+(?:\.\d+)?)\s*(h|m|min)$/
 const UNTIL = /^until\s+(\d{1,2}):(\d{2})$/
@@ -111,6 +114,7 @@ const NEARLY_FULL = { plugin: 'cache-keep-warm', key: 'nearlyFull' } as const
 // `savedTtl` is the length this session's own cache had when the store last saw it.
 // `visiblePingAt`: when a visible ping was submitted, until its request is seen.
 // `pingTurnId`: the visible ping's turn, which is no sign of use when it ends.
+// `answersWithoutPlan`: answers since the plan's windows were last seen.
 // `roomChecked`: whether this process has worked out if the visible ping fits.
 // `isFirstRequest`: the first request after a start says nothing about the cache's length.
 const live: {
@@ -123,6 +127,7 @@ const live: {
   isFirstRequest: boolean
   visiblePingAt: number
   pingTurnId: string
+  answersWithoutPlan: number
   roomChecked: boolean
 } = {
   storeKey: '',
@@ -134,6 +139,7 @@ const live: {
   isFirstRequest: true,
   visiblePingAt: 0,
   pingTurnId: '',
+  answersWithoutPlan: 0,
   roomChecked: false,
 }
 
@@ -192,10 +198,14 @@ async function detectTtl($: EngineInterface, usage: SessionUsage): Promise<KeepW
     // The windows arrive with the first response, so before one an empty list proves nothing:
     // until then, go by the length this session's cache had when last saved (what its last
     // request really got), else by what the plan showed last time in any session.
+    // A saved "API key" next to a plan seen since may be that wrong label: the plan wins.
+    const known = live.planTtl && live.planTtl.reason !== 'api' ? live.planTtl : undefined
     const { value: sawResponse = false } = await $.state.get(SAW_RESPONSE)
-    if (!sawResponse) return live.savedTtl ?? live.planTtl ?? null
+    if (!sawResponse) return (live.savedTtl?.reason === 'api' ? known : live.savedTtl) ?? live.planTtl ?? null
+    if (known && live.answersWithoutPlan < API_AFTER_ANSWERS) return known
     return rememberPlan($, { ms: FIVE_MIN_MS, reason: 'api' })
   }
+  live.answersWithoutPlan = 0
   return rememberPlan(
     $,
     plan.some(w => w.percentUsed >= PLAN_LIMIT_PERCENT) ? { ms: FIVE_MIN_MS, reason: 'overage' } : { ms: HOUR_MS, reason: 'subscription' },
@@ -564,6 +574,7 @@ export const register: Register = (on, options) => {
       if (e.usage) {
         await $.state.set(SAW_RESPONSE, true)
         if (!isPingTurn) await $.state.set(PINGS, [])
+        live.answersWithoutPlan++
       } else if (live.visiblePingAt > 0) {
         live.visiblePingAt = 0
         if (e.reason === 'error') {
